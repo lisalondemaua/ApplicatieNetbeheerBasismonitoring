@@ -1,0 +1,78 @@
+{% extends "monitoring/base.html" %}
+
+{% block title %}Sensor {{ sensor.sensor_id }} — Netkwaliteit{% endblock %}
+
+{% block content %}
+<a href="{% url 'monitoring:sensor_lijst' %}" class="back-link">← Terug naar sensoren</a>
+
+<div class="page-header">
+    <h1>{{ sensor.sensor_id }}</h1>
+    <p>Type: {{ sensor.type }} &nbsp;|&nbsp; Status:
+        {% if sensor.status == 'actief' %}
+            <span class="badge badge-ok">{{ sensor.status }}</span>
+        {% else %}
+            <span class="badge badge-warn">{{ sensor.status }}</span>
+        {% endif %}
+    </p>
+
+
+    <p>Spanningsniveau: {{ sensor.net.spanningsniveau }} kV</p>
+</div>
+
+<div class="alert alert-info">
+    Frequentiegrenzen: <strong>{{ freq_min }} Hz</strong> – <strong>{{ freq_max }} Hz</strong>
+</div>
+
+<div class="card">
+    <div class="card-title">Laatste 50 metingen</div>
+    {% if metingen %}
+    <table>
+        <thead>
+            <tr>
+                <th>Datum &amp; Tijd</th>
+                <th>Waarde (Hz)</th>
+                <th>Kwaliteit</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for m in metingen %}
+            <tr>
+                <td>{{ m.tijdstip|date:"d-m-Y H:i:s" }}</td>
+                <td class="{% if m.waarde >= freq_min and m.waarde <= freq_max %}freq-ok{% else %}freq-danger{% endif %}">
+                    {{ m.waarde|floatformat:4 }}
+                </td>
+                <td style="color:var(--muted); font-size:12px;">{{ m.kwaliteit }}</td>
+                <td>
+                    {% if m.waarde >= freq_min and m.waarde <= freq_max %}
+                        <span class="badge badge-ok">OK</span>
+                    {% else %}
+                        <span class="badge badge-danger">Afwijking</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">Geen metingen voor deze sensor.</div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="card-title">Afwijkingen voor deze sensor</div>
+    {% if afwijkingen %}
+    <ul class="result-list">
+        {% for afw in afwijkingen %}
+        <li>
+            <span style="color:var(--muted); font-family:var(--mono); font-size:11px;">{{ afw.begintijd|date:"d-m-Y H:i" }}</span>
+            <span class="badge badge-danger">{{ afw.type }}</span>
+            {{ afw.omschrijving }}
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state">Geen afwijkingen voor deze sensor.</div>
+    {% endif %}
+</div>
+{% endblock %}

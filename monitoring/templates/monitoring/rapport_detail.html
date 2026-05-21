@@ -1,0 +1,38 @@
+{% extends "monitoring/base.html" %}
+
+{% block title %}{{ rapport.titel }} — Netkwaliteit{% endblock %}
+
+{% block content %}
+<a href="{% url 'monitoring:rapport_lijst' %}" class="back-link">← Terug naar rapporten</a>
+
+<div class="page-header">
+    <h1>{{ rapport.titel }}</h1>
+    <p>Rapport ID: {{ rapport.rapport_id }}</p>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+    <div class="stat-card">
+        <div class="stat-label">Aangemaakt op</div>
+        <div style="font-family:var(--mono); font-size:14px; color:var(--text); margin-top:4px;">
+            {{ rapport.aangemaakt_op|date:"d-m-Y H:i" }}
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Periode</div>
+        <div style="font-family:var(--mono); font-size:13px; color:var(--text); margin-top:4px;">
+            {{ rapport.periode_start|date:"d-m-Y" }} – {{ rapport.periode_einde|date:"d-m-Y" }}
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Opgesteld door</div>
+        <div style="font-family:var(--mono); font-size:14px; color:var(--text); margin-top:4px;">
+            {{ rapport.operator.naam|default:"Onbekend" }}
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">Inhoud</div>
+    <pre style="font-family:var(--mono); font-size:12px; color:var(--text); white-space:pre-wrap; line-height:1.6; background:var(--bg); padding:1rem; border-radius:4px; border:1px solid var(--border);">{{ rapport.inhoud }}</pre>
+</div>
+{% endblock %}

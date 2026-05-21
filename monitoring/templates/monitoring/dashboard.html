@@ -1,0 +1,201 @@
+{% extends "monitoring/base.html" %}
+
+{% block title %}Dashboard — Netkwaliteit{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <p>Laatste frequentiemetingen en recente afwijkingen</p>
+</div>
+
+<div class="alert alert-info">
+    Netfrequentiegrenzen: <strong>{{ freq_min }} Hz</strong> – <strong>{{ freq_max }} Hz</strong>
+    {% if net %}&nbsp;|&nbsp; Net: <strong>{{ net.net_id }}</strong> ({{ net.type }}){% endif %}
+</div>
+
+{# ------------------------------------------------------------------ #}
+{# INFEED SAMENVATTING                                               #}
+{# ------------------------------------------------------------------ #}
+{% if infeed_rows %}
+<div class="card">
+    <div class="card-title">Infeed overzicht (Elia ods091 — laatste meting per station)</div>
+
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+        <div style="background: var(--surface, #f5f5f5); border-radius: 8px; padding: 1rem 1.5rem; min-width: 160px;">
+            <div style="font-size: 12px; color: var(--muted, #888); margin-bottom: 4px;">Totale infeed</div>
+            <div style="font-size: 24px; font-weight: 500;">
+                {{ totaal_infeed_mw|floatformat:1 }}
+                <span style="font-size:14px; font-weight:400;">MW</span>
+            </div>
+        </div>
+
+        <div style="background: var(--surface, #f5f5f5); border-radius: 8px; padding: 1rem 1.5rem; min-width: 160px;">
+            <div style="font-size: 12px; color: var(--muted, #888); margin-bottom: 4px;">Actieve stations</div>
+            <div style="font-size: 24px; font-weight: 500;">{{ infeed_rows|length }}</div>
+        </div>
+
+        <div style="background: var(--surface, #f5f5f5); border-radius: 8px; padding: 1rem 1.5rem; min-width: 160px;">
+            <div style="font-size: 12px; color: var(--muted, #888); margin-bottom: 4px;">Teruglevering</div>
+            <div style="font-size: 24px; font-weight: 500;">{{ aantal_teruglevering }}</div>
+            <div style="font-size: 11px; color: var(--muted, #888);">stations leveren terug</div>
+        </div>
+    </div>
+
+    {% if dso_samenvatting %}
+    <div style="margin-bottom: 1rem;">
+        <div style="font-size: 13px; font-weight: 500; color: var(--muted, #888); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: .04em;">
+            Per DSO
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>DSO</th>
+                    <th>Stations</th>
+                    <th>Totaal (MW)</th>
+                    <th>Teruglevering</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for dso, stats in dso_samenvatting %}
+                <tr>
+                    <td>{{ dso }}</td>
+                    <td>{{ stats.aantal_stations }}</td>
+                    <td>{{ stats.totaal_mw|floatformat:2 }}</td>
+                    <td>
+                        {% if stats.teruglevering > 0 %}
+                            <span class="badge badge-danger">{{ stats.teruglevering }}</span>
+                        {% else %}
+                            <span style="color: var(--muted, #888);">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="card-title">Infeed per station</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Tijdstip</th>
+                <th>Station</th>
+                <th>Locatie</th>
+                <th>Regio</th>
+                <th>DSO</th>
+                <th>Spanning</th>
+                <th>Infeed (MW)</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in infeed_rows %}
+            <tr>
+                <td style="font-size:12px; color: var(--muted);">{{ r.tijdstip|date:"d-m-Y H:i" }}</td>
+                <td style="font-family: var(--mono); font-size:12px;">{{ r.station }}</td>
+                <td style="font-size:12px;">{{ r.location }}</td>
+                <td style="font-size:12px;">{{ r.region }}</td>
+                <td style="font-size:12px;">{{ r.dso }}</td>
+                <td style="font-size:12px;">{{ r.voltagelevel }} kV</td>
+                <td class="{% if r.is_teruglevering %}freq-danger{% else %}freq-ok{% endif %}">
+                    {{ r.waarde|floatformat:3 }}
+                </td>
+                <td>
+                    {% if r.is_teruglevering %}
+                        <span class="badge badge-danger">Teruglevering</span>
+                    {% else %}
+                        <span class="badge badge-ok">Infeed</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{# ------------------------------------------------------------------ #}
+{# BOKEH FREQUENTIEGRAFIEK                                           #}
+{# ------------------------------------------------------------------ #}
+{% if bokeh_div %}
+<div class="card">
+    <div class="card-title">Frequentieverloop over tijd</div>
+    {{ bokeh_script|safe }}
+    {{ bokeh_div|safe }}
+</div>
+{% endif %}
+
+{# ------------------------------------------------------------------ #}
+{# FREQUENTIEMETINGEN                                                #}
+{# ------------------------------------------------------------------ #}
+<div class="card">
+    <div class="card-title">Laatste 20 metingen</div>
+
+    {% if laatste_metingen %}
+    <table>
+        <thead>
+            <tr>
+                <th>Datum &amp; Tijd</th>
+                <th>Sensor</th>
+                <th>Frequentie (Hz)</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for m in laatste_metingen %}
+            <tr>
+                <td>{{ m.tijdstip|date:"d-m-Y H:i:s" }}</td>
+                <td style="font-family: var(--mono); font-size:12px; color: var(--muted);">{{ m.sensor_id }}</td>
+                <td class="{% if m.in_spec %}freq-ok{% else %}freq-danger{% endif %}">
+                    {{ m.waarde|floatformat:4 }}
+                </td>
+                <td>
+                    {% if m.in_spec %}
+                        <span class="badge badge-ok">OK</span>
+                    {% else %}
+                        <span class="badge badge-danger">Afwijking</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">Geen metingen gevonden.</div>
+    {% endif %}
+</div>
+
+{# ------------------------------------------------------------------ #}
+{# LOAD METINGEN                                                      #}
+{# ------------------------------------------------------------------ #}
+{% if laatste_load_metingen %}
+<div class="card">
+    <div class="card-title">Laatste 20 netbelastingsmetingen</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Datum &amp; Tijd</th>
+                <th>Sensor</th>
+                <th>Belasting (MW)</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for m in laatste_load_metingen %}
+            <tr>
+                <td>{{ m.tijdstip|date:"d-m-Y H:i:s" }}</td>
+                <td style="font-family: var(--mono); font-size:12px; color: var(--muted);">
+                    {{ m.sensor_id }}
+                </td>
+                <td>{{ m.waarde|floatformat:2 }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}

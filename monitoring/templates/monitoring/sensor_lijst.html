@@ -1,0 +1,48 @@
+{% extends "monitoring/base.html" %}
+
+{% block title %}Sensoren — Netkwaliteit{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Sensoren</h1>
+    <p>Overzicht van alle geregistreerde sensoren</p>
+</div>
+
+<div class="card">
+    <div class="card-title">Alle sensoren</div>
+    {% if sensoren %}
+    <table>
+        <thead>
+            <tr>
+                <th>Sensor ID</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Net</th>
+                <th>Infrastructuur</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for s in sensoren %}
+            <tr>
+                <td style="font-family:var(--mono); font-size:12px;">{{ s.sensor_id }}</td>
+                <td>{{ s.type }}</td>
+                <td>
+                    {% if s.status == 'actief' %}
+                        <span class="badge badge-ok">{{ s.status }}</span>
+                    {% else %}
+                        <span class="badge badge-warn">{{ s.status }}</span>
+                    {% endif %}
+                </td>
+                <td style="color:var(--muted); font-size:12px;">{{ s.net.net_id|default:"–" }}</td>
+                <td style="color:var(--muted); font-size:12px;">{{ s.infrastructuur.naam|default:"–" }}</td>
+                <td><a href="{% url 'monitoring:sensor_detail' s.pk %}" class="btn btn-secondary" style="padding:4px 10px; font-size:10px;">Details</a></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">Geen sensoren gevonden.</div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,322 @@
+
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Netkwaliteit Monitor{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <!-- Bokeh CDN -->
+    <script src="https://cdn.bokeh.org/bokeh/release/bokeh-3.9.0.min.js"></script>
+    <script src="https://cdn.bokeh.org/bokeh/release/bokeh-widgets-3.9.0.min.js"></script>
+    <script src="https://cdn.bokeh.org/bokeh/release/bokeh-tables-3.9.0.min.js"></script>
+    <style>
+        :root {
+            --bg:        #f5f7fa;
+            --surface:   #ffffff;
+            --border:    #e1e4e8;
+            --accent:    #0070f3;
+            --accent2:   #f5a623;
+            --danger:    #e53e3e;
+            --success:   #38a169;
+            --text:      #1a202c;
+            --muted:     #718096;
+            --mono:      'IBM Plex Mono', monospace;
+            --sans:      'IBM Plex Sans', sans-serif;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: 14px;
+            min-height: 100vh;
+        }
+
+        /* ── NAVBAR ── */
+        nav {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 2rem;
+            height: 56px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        }
+
+        .nav-brand {
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--accent);
+            text-decoration: none;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+            margin-right: 3rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 0;
+            list-style: none;
+            height: 100%;
+        }
+
+        .nav-links a {
+            display: flex;
+            align-items: center;
+            padding: 0 1.2rem;
+            height: 56px;
+            color: var(--muted);
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            transition: color 0.2s, border-color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--text);
+            border-bottom-color: var(--accent);
+        }
+
+        /* ── PAGE LAYOUT ── */
+        .page-wrapper {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2.5rem 2rem;
+        }
+
+        /* ── PAGE HEADER ── */
+        .page-header {
+            margin-bottom: 2rem;
+            border-left: 3px solid var(--accent);
+            padding-left: 1rem;
+        }
+
+        .page-header h1 {
+            font-family: var(--sans);
+            font-size: 22px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .page-header p {
+            color: var(--muted);
+            margin-top: 4px;
+            font-size: 13px;
+        }
+
+        /* ── CARDS ── */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+
+        .card-title {
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 1rem;
+        }
+
+        /* ── TABLES ── */
+        table { width: 100%; border-collapse: collapse; }
+
+        th {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--muted);
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 2px solid var(--border);
+            background: #fafbfc;
+        }
+
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+            font-size: 13px;
+        }
+
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #f8faff; }
+
+        /* ── BADGES ── */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-ok     { background: #ebfbee; color: var(--success); }
+        .badge-danger { background: #fff5f5; color: var(--danger); }
+        .badge-warn   { background: #fffbeb; color: var(--accent2); }
+
+        /* ── FORMS ── */
+        .form-group { margin-bottom: 1.2rem; }
+
+        label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text);
+            margin-bottom: 6px;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: 13px;
+            padding: 8px 12px;
+            width: 100%;
+            max-width: 360px;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0,112,243,0.1);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 18px;
+            border-radius: 6px;
+            font-family: var(--sans);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            text-decoration: none;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        .btn:hover { opacity: 0.85; transform: translateY(-1px); text-decoration: none; }
+
+        .btn-primary { background: var(--accent); color: #fff; }
+
+        .btn-secondary {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--muted);
+        }
+
+        .btn-secondary:hover { color: var(--text); }
+
+        /* ── ALERTS ── */
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .alert-info    { background: #ebf8ff; border: 1px solid #bee3f8; color: #2b6cb0; }
+        .alert-danger  { background: #fff5f5; border: 1px solid #fed7d7; color: #c53030; }
+        .alert-warning { background: #fffbeb; border: 1px solid #fbd38d; color: #b7791f; }
+
+        /* ── LINKS ── */
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* ── EMPTY STATE ── */
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        /* ── RESULT LIST ── */
+        .result-list { list-style: none; }
+        .result-list li {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .result-list li:last-child { border-bottom: none; }
+
+        /* ── FREQ VALUE ── */
+        .freq-ok     { color: var(--success); font-family: var(--mono); }
+        .freq-danger { color: var(--danger);  font-family: var(--mono); font-weight: 600; }
+
+        /* ── BACK LINK ── */
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--muted);
+            font-size: 13px;
+            margin-bottom: 1.5rem;
+        }
+        .back-link:hover { color: var(--text); text-decoration: none; }
+
+        /* ── STAT CARD ── */
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.2rem 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+        .stat-label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+    </style>
+</head>
+<body>
+
+<nav>
+    <a href="{% url 'monitoring:index' %}" class="nav-brand">Netkwaliteit Monitor</a>
+    <ul class="nav-links">
+        <li><a href="{% url 'monitoring:dashboard' %}">Dashboard</a></li>
+        <li><a href="{% url 'monitoring:sensor_lijst' %}">Sensoren</a></li>
+        <li><a href="{% url 'monitoring:afwijkingen_lijst' %}">Afwijkingen</a></li>
+        <li><a href="{% url 'monitoring:rapport_lijst' %}">Rapporten</a></li>
+    </ul>
+</nav>
+
+<div class="page-wrapper">
+    {% block content %}{% endblock %}
+</div>
+
+</body>
+</html>
