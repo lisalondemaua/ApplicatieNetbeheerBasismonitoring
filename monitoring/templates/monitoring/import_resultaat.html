@@ -1,0 +1,28 @@
+{% extends "monitoring/base.html" %}
+
+{% block title %}Importresultaat — Netkwaliteit{% endblock %}
+
+{% block content %}
+<a href="{% url 'monitoring:dashboard' %}" class="back-link">← Terug naar dashboard</a>
+
+<div class="page-header">
+    <h1>Sensorimport resultaat</h1>
+    <p>Resultaat van de Elia API-import voor sensoren</p>
+</div>
+
+<div class="card">
+    <div class="card-title">Status</div>
+    <div class="alert alert-info">{{ message }}</div>
+</div>
+
+{% if fouten %}
+<div class="card">
+    <div class="card-title">Fouten</div>
+    <ul class="result-list">
+        {% for fout in fouten %}
+            <li>{{ fout }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+{% endblock %}
