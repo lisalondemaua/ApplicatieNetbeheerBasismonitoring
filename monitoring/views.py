@@ -58,6 +58,7 @@ class DashboardView(generic.TemplateView):
         should_fetch_next_page = True
         offset = 0
         maximum_limit = 100
+        maximum_totaal_resultaten = 500
         api_resultaten = []
 
         while should_fetch_next_page:
@@ -72,20 +73,24 @@ class DashboardView(generic.TemplateView):
             )
 
             if response.status_code == 200:
-                source = response.text
-                data = json.loads(source)
+                data = json.loads(response.text)
                 batch = data.get("records", [])
-                api_resultaten.extend(batch)
+                resterende_slots = maximum_totaal_resultaten - len(api_resultaten)
+                if resterende_slots > 0:
+                    api_resultaten.extend(batch[:resterende_slots])
                 print(f"Frequenties refresh klaar: {len(api_resultaten)} resultaten ontvangen")
+
+                if len(api_resultaten) >= maximum_totaal_resultaten:
+                    should_fetch_next_page = False
+                elif len(batch) == maximum_limit:
+                    offset += maximum_limit
+                else:
+                    should_fetch_next_page = False
+
             else:
                 print("Er liep iets fout bij het ophalen van de frequenties:", response.status_code)
                 should_fetch_next_page = False
                 break
-
-            if len(batch) == maximum_limit:
-                offset += maximum_limit
-            else:
-                should_fetch_next_page = False
 
         for r in api_resultaten:
             fields = r.get("fields", {})
@@ -112,8 +117,8 @@ class DashboardView(generic.TemplateView):
         # ── EINDE API REFRESH ─────────────────────────────────────────────────
 
         net = Net.objects.first()
-        freq_min = net.freq_min if net else 49.99
-        freq_max = net.freq_max if net else 50.01
+        freq_min = net.freq_min if net else 49.50
+        freq_max = net.freq_max if net else 50.50
 
         parameter_freq = Meetparameter.objects.filter(naam='frequentie').first()
         parameter_infeed = Meetparameter.objects.filter(naam='infeedvalue').first()
@@ -348,8 +353,8 @@ class SensorDetailView(generic.DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         sensor = self.get_object()
-        freq_min = sensor.net.freq_min if sensor.net else 49.99
-        freq_max = sensor.net.freq_max if sensor.net else 50.01
+        freq_min = sensor.net.freq_min if sensor.net else 49.50
+        freq_max = sensor.net.freq_max if sensor.net else 50.50
         metingen = sensor.metingen.order_by('-tijdstip')[:50]
         afwijkingen = Afwijking.objects.filter(meting__sensor=sensor).order_by('-begintijd')
         context.update({
@@ -368,8 +373,8 @@ class AfwijkingenListView(generic.ListView):
 
     def get_queryset(self):
         net = Net.objects.first()
-        freq_min = net.freq_min if net else 49.99
-        freq_max = net.freq_max if net else 50.01
+        freq_min = net.freq_min if net else 49.50
+        freq_max = net.freq_max if net else 50.50
         return Meting.objects.filter(
             Q(waarde__lt=freq_min) | Q(waarde__gt=freq_max)
         ).select_related('sensor').order_by('-tijdstip')
@@ -378,52 +383,12 @@ class AfwijkingenListView(generic.ListView):
         context = super().get_context_data(**kwargs)
         net = Net.objects.first()
         context.update({
-            "freq_min": net.freq_min if net else 49.99,
-            "freq_max": net.freq_max if net else 50.01,
+            "freq_min": net.freq_min if net else 49.50,
+            "freq_max": net.freq_max if net else 50.50,
             "net": net,
         })
         return context
 
-# SENSOR ZOEKEN (ListView + GET-formulier)
-
-class SensorZoekenView(generic.ListView):
-    template_name = 'monitoring/sensor_zoeken.html'
-    model = Sensor
-    context_object_name = 'object_list'
-
-    def get_queryset(self):
-        query_id = self.request.GET.get('query_sensor_id', False)
-        query_type = self.request.GET.get('query_type', False)
-
-        if not query_id and not query_type:
-            return Sensor.objects.none()
-        elif not query_type:
-            return Sensor.objects.filter(sensor_id__icontains=query_id)
-        elif not query_id:
-            return Sensor.objects.filter(type__icontains=query_type)
-        else:
-            return Sensor.objects.filter(
-                sensor_id__icontains=query_id,
-                type__icontains=query_type
-            )
-
-# SENSOR ANALYSE — sensoren met veel afwijkingen
-
-class SensorAnalyseView(generic.ListView):
-    template_name = 'monitoring/sensor_analyse.html'
-    model = Sensor
-    context_object_name = 'object_list'
-
-    def get_queryset(self):
-        input_aantal = self.request.GET.get('query_aantal', False)
-        if input_aantal:
-            return (
-                Sensor.objects
-                .annotate(aantal_afwijkingen=Count('metingen__afwijkingen'))
-                .filter(aantal_afwijkingen__gt=input_aantal)
-                .order_by('-aantal_afwijkingen')
-            )
-        return Sensor.objects.none()
 
 # RAPPORTEN (ListView + DetailView)
 
