@@ -58,6 +58,7 @@ class DashboardView(generic.TemplateView):
         should_fetch_next_page = True
         offset = 0
         maximum_limit = 100
+        maximum_totaal_resultaten = 500
         api_resultaten = []
 
         while should_fetch_next_page:
@@ -75,14 +76,18 @@ class DashboardView(generic.TemplateView):
                 source = response.text
                 data = json.loads(source)
                 batch = data.get("records", [])
-                api_resultaten.extend(batch)
+                resterende_slots = maximum_totaal_resultaten - len(api_resultaten)
+                if resterende_slots > 0:
+                    api_resultaten.extend(batch[:resterende_slots])
                 print(f"Frequenties refresh klaar: {len(api_resultaten)} resultaten ontvangen")
             else:
                 print("Er liep iets fout bij het ophalen van de frequenties:", response.status_code)
                 should_fetch_next_page = False
                 break
 
-            if len(batch) == maximum_limit:
+            if len(api_resultaten) >= maximum_totaal_resultaten:
+                should_fetch_next_page = False
+            elif len(batch) == maximum_limit:
                 offset += maximum_limit
             else:
                 should_fetch_next_page = False
