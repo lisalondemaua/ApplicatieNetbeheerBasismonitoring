@@ -3,7 +3,8 @@ import json
 
 from django.views import generic
 from django.db.models import Q, Count
-from django.shortcuts import render
+from django.shortcuts import render, redirect
+from django.contrib import messages
 from django.utils.dateparse import parse_datetime
 from bokeh.plotting import figure
 from bokeh.embed import components
@@ -421,11 +422,11 @@ def importeer_sensors_api_view(request):
             if response.status_code == 200:
                 data = response.json()
             else:
-                return render(request, "monitoring/import_resultaat.html", {
-                    "message": "API call mislukt met status: " + str(response.status_code)
-                })
+                messages.error(request, "API call mislukt met status: " + str(response.status_code))
+                return redirect("monitoring:dashboard")
     except Exception as e:
-        return render(request, "monitoring/import_resultaat.html", {"message": f"Fout tijdens API call: {e}"})
+        messages.error(request, f"Fout tijdens API call: {e}")
+        return redirect("monitoring:dashboard")
 
     resultaten = data.get("results", [])
     for r in resultaten:
@@ -472,7 +473,11 @@ def importeer_sensors_api_view(request):
         except Exception as e:
             fouten.append(f"Sensor {ean}: {e}")
 
-    return render(request, "monitoring/import_resultaat.html", {
-        "message": f"Import klaar. Aangemaakt: {aantal_aangemaakt}, Bijgewerkt: {aantal_bijgewerkt}, Fouten: {len(fouten)}",
-        "fouten": fouten,
-    })
+    if fouten:
+        for fout in fouten:
+            messages.warning(request, fout)
+    messages.success(
+        request,
+        f"Import klaar. Aangemaakt: {aantal_aangemaakt}, Bijgewerkt: {aantal_bijgewerkt}, Fouten: {len(fouten)}",
+    )
+    return redirect("monitoring:dashboard")
