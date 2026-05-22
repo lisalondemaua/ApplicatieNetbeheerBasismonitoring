@@ -1,5 +1,6 @@
 import requests
 import json
+from collections import defaultdict
 
 from django.views import generic
 from django.db.models import Q, Count
@@ -353,9 +354,33 @@ class SensorDetailView(generic.DetailView):
         sensor = self.get_object()
         freq_min = sensor.net.freq_min if sensor.net else 49.50
         freq_max = sensor.net.freq_max if sensor.net else 50.50
-        metingen = sensor.metingen.order_by('-tijdstip')[:50]
+        metingen = []
+        metingen_per_parameter = defaultdict(list)
+
+        for m in sensor.metingen.select_related('parameter').order_by('-tijdstip')[:50]:
+            parameter_naam = (m.parameter.naam if m.parameter else "onbekend")
+            parameter_naam_lower = parameter_naam.lower()
+            is_frequentie = parameter_naam_lower in {"frequentie", "actualfrequency"}
+            freq_in_spec = (
+                m.waarde is not None and freq_min <= m.waarde <= freq_max
+                if is_frequentie else None
+            )
+
+            meting_row = {
+                "tijdstip": m.tijdstip,
+                "waarde": m.waarde,
+                "kwaliteit": m.kwaliteit,
+                "parameter_naam": parameter_naam,
+                "eenheid": m.parameter.eenheid if m.parameter else "",
+                "is_frequentie": is_frequentie,
+                "freq_in_spec": freq_in_spec,
+            }
+            metingen.append(meting_row)
+            metingen_per_parameter[parameter_naam].append(meting_row)
+
         context.update({
             'metingen': metingen,
+            'metingen_per_parameter': dict(metingen_per_parameter),
             'freq_min': freq_min,
             'freq_max': freq_max,
         })
@@ -441,6 +466,72 @@ def importeer_sensors_api_view(request):
                 aantal_aangemaakt += 1
             else:
                 aantal_bijgewerkt += 1
+
+            parameter_definities = [
+                ("infeedvalue", "infeedvalue", "MW"),
+                ("actualfrequency", "frequentie", "Hz"),
+                ("totalload", "totalload", "MW"),
+                ("load", "totalload", "MW"),
+            ]
+            kwaliteit = (
+                r.get("quality")
+                or r.get("qualitystatus")
+                or r.get("quality_status")
+                or "in_spec"
+            )
+
+            tijdstip_raw = (
+                r.get("datetime")
+                or r.get("timestamp")
+                or r.get("tijdstip")
+                or r.get("datehour")
+            )
+            tijdstip = parse_datetime(tijdstip_raw) if tijdstip_raw else None
+            if not tijdstip:
+                continue
+            if timezone.is_naive(tijdstip):
+                tijdstip = timezone.make_aware(tijdstip, timezone.get_current_timezone())
+
+            for bronveld, parameter_naam, eenheid in parameter_definities:
+                ruwe_waarde = r.get(bronveld)
+                if ruwe_waarde is None:
+                    continue
+
+                try:
+                    waarde = float(ruwe_waarde)
+                except (TypeError, ValueError):
+                    continue
+
+                parameter_obj, _ = Meetparameter.objects.get_or_create(
+                    naam=parameter_naam,
+                    defaults={
+                        "eenheid": eenheid,
+                        "drempel_onder": -999999999.0,
+                        "drempel_boven": 999999999.0,
+                    }
+                )
+
+                bestaand = Meting.objects.filter(
+                    sensor=obj,
+                    parameter=parameter_obj,
+                    tijdstip=tijdstip,
+                ).first()
+
+                if bestaand:
+                    bestaand.waarde = waarde
+                    bestaand.kwaliteit = kwaliteit
+                    bestaand.infeed_value = waarde if parameter_naam == "infeedvalue" else 0
+                    bestaand.save(update_fields=["waarde", "kwaliteit", "infeed_value"])
+                else:
+                    nieuwe_meting = Meting.objects.create(
+                        sensor=obj,
+                        parameter=parameter_obj,
+                        waarde=waarde,
+                        kwaliteit=kwaliteit,
+                        infeed_value=waarde if parameter_naam == "infeedvalue" else 0,
+                    )
+                    # `tijdstip` heeft auto_now_add=True; update() nodig om API-tijdstip te bewaren.
+                    Meting.objects.filter(pk=nieuwe_meting.pk).update(tijdstip=tijdstip)
         except Exception as e:
             fouten.append(f"Sensor {ean}: {e}")
 
@@ -452,4 +543,3 @@ def importeer_sensors_api_view(request):
         f"Import klaar. Aangemaakt: {aantal_aangemaakt}, Bijgewerkt: {aantal_bijgewerkt}, Fouten: {len(fouten)}",
     )
     return redirect("monitoring:dashboard")
-
