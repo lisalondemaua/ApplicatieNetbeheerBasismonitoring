@@ -24,7 +24,6 @@ class SensorImportViewTests(TestCase):
                     "datetime": "2026-05-22T10:00:00+00:00",
                     "infeedvalue": 12.34,
                     "actualfrequency": 49.95,
-                    "totalload": 8765.4,
                     "qualitystatus": "in_spec",
                 }
             ]
@@ -36,18 +35,18 @@ class SensorImportViewTests(TestCase):
 
         eerste = self.client.get(import_url)
         self.assertEqual(eerste.status_code, 302)
-        self.assertEqual(Meting.objects.count(), 3)
+        self.assertEqual(Meting.objects.count(), 2)
 
         sensor = Sensor.objects.get(sensor_id="EAN-001")
-        self.assertEqual(sensor.metingen.count(), 3)
+        self.assertEqual(sensor.metingen.count(), 2)
         self.assertSetEqual(
             set(sensor.metingen.values_list("parameter__naam", flat=True)),
-            {"infeedvalue", "frequentie", "totalload"},
+            {"infeedvalue", "frequentie"},
         )
 
         tweede = self.client.get(import_url)
         self.assertEqual(tweede.status_code, 302)
-        self.assertEqual(Meting.objects.count(), 3)
+        self.assertEqual(Meting.objects.count(), 2)
 
 
 class SensorDetailViewTests(TestCase):

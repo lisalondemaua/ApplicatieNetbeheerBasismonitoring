@@ -124,7 +124,6 @@ class DashboardView(generic.TemplateView):
 
         parameter_freq = Meetparameter.objects.filter(naam='frequentie').first()
         parameter_infeed = Meetparameter.objects.filter(naam='infeedvalue').first()
-        parameter_load = Meetparameter.objects.filter(naam='totalload').first()
 
         # FREQUENTIE
         laatste_metingen_qs = (
@@ -287,35 +286,6 @@ class DashboardView(generic.TemplateView):
                 if row['is_teruglevering']:
                     dso_samenvatting[dso]["teruglevering"] += 1
 
-        # TOTAL LOAD
-        laatste_load_metingen = []
-        totaal_load_mw = None
-
-        if parameter_load:
-            load_qs = (
-                Meting.objects.filter(parameter=parameter_load)
-                .select_related('sensor')
-                .order_by('-tijdstip')[:20]
-            )
-
-            for m in load_qs:
-                try:
-                    waarde = float(m.waarde)
-                except (TypeError, ValueError):
-                    waarde = None
-
-                laatste_load_metingen.append({
-                    "tijdstip": m.tijdstip,
-                    "waarde": waarde,
-                    "sensor_id": m.sensor.sensor_id if m.sensor else "–",
-                })
-
-            if load_qs.exists():
-                try:
-                    totaal_load_mw = float(load_qs.first().waarde)
-                except (TypeError, ValueError):
-                    totaal_load_mw = None
-
         context.update({
             "laatste_metingen": meting_rows,
             "infeed_rows": infeed_rows,
@@ -325,8 +295,6 @@ class DashboardView(generic.TemplateView):
             "net": net,
             "totaal_infeed_mw": sum(r['waarde'] for r in infeed_rows if r['waarde'] is not None),
             "aantal_teruglevering": sum(1 for r in infeed_rows if r['is_teruglevering']),
-            "laatste_load_metingen": laatste_load_metingen,
-            "totaal_load_mw": totaal_load_mw,
             "bokeh_script": bokeh_script,
             "bokeh_div": bokeh_div,
             "sensoren_totaal": sensoren_totaal,   # <-- alleen display, GEEN DB-bijwerken hier!
@@ -470,8 +438,6 @@ def importeer_sensors_api_view(request):
             parameter_definities = [
                 ("infeedvalue", "infeedvalue", "MW"),
                 ("actualfrequency", "frequentie", "Hz"),
-                ("totalload", "totalload", "MW"),
-                ("load", "totalload", "MW"),
             ]
             kwaliteit = (
                 r.get("quality")

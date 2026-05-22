@@ -45,28 +45,6 @@ def frequentieAPI():
     ]
 
 
-def totalLoadAPI():
-    url = "https://opendata.elia.be/api/explore/v2.1/catalog/datasets/ods001/records"
-    params = {"limit": AMOUNT_GENERATED_DATA}
-    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-
-    with requests.get(url, params=params, headers=headers, timeout=30) as response:
-        if response.status_code == 200:
-            data = json.loads(response.text)
-        else:
-            print("Er trad een fout op bij het ophalen van de total-load-API.")
-            return []
-
-    return [
-        {
-            "tijdstip": r.get("datetime"),
-            "waarde":   r.get("totalload"),
-        }
-        for r in data.get("results", [])
-        if r.get("datetime") and r.get("totalload") is not None
-    ]
-
-
 from django.utils import timezone
 
 def infeedPerStationAPI():
@@ -164,39 +142,6 @@ class GenereerData(TransactionTestCase):
             drempel_boven=50.5,
         )
 
-        # ── Vaste structuurobjecten: total load ───────────────────────────────
-        net_load = baker.make_recipe(
-            'monitoring.net',
-            net_id="ELIA_LOAD_NET",
-            type="Transmissienet",
-            spanningsniveau=380.0,
-        )
-        infra_load = baker.make_recipe(
-            'monitoring.infra',
-            infrastructuur_id="NATIONAAL_LOAD",
-            naam="Belgisch load monitoring systeem",
-            type="Load monitoring",
-            locatie="België",
-            status="actief",
-            beheerder="Elia",
-        )
-        sensor_load = baker.make_recipe(
-            'monitoring.sensor',
-            sensor_id="ELIA-LOAD",
-            type="Netbelasting (nationaal)",
-            net=net_load,
-            infrastructuur=infra_load,
-            communicatie_protocol="N.v.t.",
-            status="actief",
-        )
-        param_load = baker.make_recipe(
-            'monitoring.parameter_spanning',
-            naam="totalload",
-            eenheid="MW",
-            drempel_onder=0,
-            drempel_boven=15000,
-        )
-
         # ── Meetparameter infeed ──────────────────────────────────────────────
         param_infeed, _ = Meetparameter.objects.get_or_create(
             naam="infeedvalue",
@@ -223,23 +168,6 @@ class GenereerData(TransactionTestCase):
                 kwaliteit="in_spec",
             )
             print(f"  {tijdstip} → {item['waarde']} Hz")
-
-        # ── Total-load-metingen via API ───────────────────────────────────────
-        load_data = totalLoadAPI()
-        print(f"\n--- Total load-metingen ({len(load_data)} records) ---")
-        for item in load_data:
-            tijdstip = parse_datetime(item["tijdstip"])
-            if tijdstip is None:
-                continue
-            baker.make_recipe(
-                'monitoring.meting',
-                sensor=sensor_load,
-                parameter=param_load,
-                tijdstip=tijdstip,
-                waarde=item["waarde"],
-                kwaliteit="in_spec" if item["waarde"] < 15000 else "waarschuwing",
-            )
-            print(f"  {tijdstip} → {item['waarde']} MW")
 
         # ── Infeed per station via API ────────────────────────────────────────
         infeed_data = infeedPerStationAPI()
