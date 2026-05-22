@@ -298,11 +298,10 @@ class GenereerData(TransactionTestCase):
             )
             print(f"  EAN {r.get('ean')} → {r['waarde']} MW")
 
-        # ── Opvuldata: operators, rapporten, afwijkingen ──────────────────────
+        # ── Opvuldata: operators, rapporten ──────────────────────
         print("\n--- Overige objecten via baker_recipes ---")
         for i in range(AMOUNT_GENERATED_DATA):
             operator = baker.make_recipe('monitoring.operator')
             baker.make_recipe('monitoring.rapport', operator=operator)
             meting = random.choice(Meting.objects.all())
-            baker.make_recipe('monitoring.afwijking', meting=meting)
-            print(f"  Operator/Rapport/Afwijking {i + 1}/{AMOUNT_GENERATED_DATA} aangemaakt.")
+            print(f"  Operator/Rapport {i + 1}/{AMOUNT_GENERATED_DATA} aangemaakt.")

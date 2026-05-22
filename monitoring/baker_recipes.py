@@ -1,5 +1,5 @@
 from model_bakery.recipe import Recipe, seq
-from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting, Netbelasting, Afwijking, Operator, Rapport
+from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting, Netbelasting, Operator, Rapport
 
 # Net
 net = Recipe(
