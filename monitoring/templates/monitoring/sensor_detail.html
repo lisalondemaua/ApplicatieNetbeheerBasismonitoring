@@ -30,8 +30,10 @@
         <thead>
             <tr>
                 <th>Datum &amp; Tijd</th>
-                <th>Waarde (Hz)</th>
-                <th>Kwaliteit</th>
+                <th>Parameter</th>
+                <th>Waarde</th>
+                <th>Eenheid</th>
+                <th>Kwaliteit / Status</th>
                 <th>Status</th>
             </tr>
         </thead>
@@ -39,15 +41,21 @@
         {% for m in metingen %}
             <tr>
                 <td>{{ m.tijdstip|date:"d-m-Y H:i:s" }}</td>
-                <td class="{% if m.waarde >= freq_min and m.waarde <= freq_max %}freq-ok{% else %}freq-danger{% endif %}">
+                <td>{{ m.parameter_naam }}</td>
+                <td class="{% if m.is_frequentie %}{% if m.freq_in_spec %}freq-ok{% else %}freq-danger{% endif %}{% endif %}">
                     {{ m.waarde|floatformat:4 }}
                 </td>
+                <td>{{ m.eenheid|default:"-" }}</td>
                 <td style="color:var(--muted); font-size:12px;">{{ m.kwaliteit }}</td>
                 <td>
-                    {% if m.waarde >= freq_min and m.waarde <= freq_max %}
-                        <span class="badge badge-ok">OK</span>
+                    {% if m.is_frequentie %}
+                        {% if m.freq_in_spec %}
+                            <span class="badge badge-ok">OK</span>
+                        {% else %}
+                            <span class="badge badge-danger">Afwijking</span>
+                        {% endif %}
                     {% else %}
-                        <span class="badge badge-danger">Afwijking</span>
+                        <span class="badge badge-warn">N.v.t.</span>
                     {% endif %}
                 </td>
             </tr>
