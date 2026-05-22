@@ -1,5 +1,5 @@
 from model_bakery.recipe import Recipe, seq
-from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting, Netbelasting, Operator, Rapport
+from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting, Operator, Rapport
 
 # Net
 net = Recipe(
@@ -55,13 +55,6 @@ meting = Recipe(
     kwaliteit='in_spec',
 )
 
-# Netbelasting
-netbelasting = Recipe(
-    Netbelasting,
-    tijdstip_meting='2026-05-01T10:05:00Z',
-    spanning=seq(230.0, increment_by=0.5),
-    frequentie=seq(50.0, increment_by=0.01),
-)
 
 # Operator
 operator = Recipe(

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Net, Infrastructuur, Meetparameter, Netbelasting, Operator, Sensor, Meting, Rapport
+from .models import Net, Infrastructuur, Meetparameter, Operator, Sensor, Meting, Rapport
 
 class MetingInline(admin.TabularInline):
     model = Meting
@@ -17,7 +17,6 @@ class RapportAdmin(admin.ModelAdmin):
 admin.site.register(Net)
 admin.site.register(Infrastructuur)
 admin.site.register(Meetparameter)
-admin.site.register(Netbelasting)
 admin.site.register(Operator)
 admin.site.register(Sensor, SensorAdmin)
 admin.site.register(Meting)

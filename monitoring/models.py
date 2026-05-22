@@ -83,19 +83,6 @@ class Meting(models.Model):
         ordering = ["-tijdstip"]
 
 
-class Netbelasting(models.Model):
-    netbelasting_id = models.AutoField(primary_key=True)
-    tijdstip_meting = models.DateTimeField()
-    spanning = models.FloatField(null=True, blank=True)
-    frequentie = models.FloatField(null=True, blank=True)
-    sensor = models.ForeignKey(Sensor, on_delete=models.CASCADE, related_name="netbelastingen", blank=True, null=True)
-
-    def __str__(self):
-        return f"Netbelasting {self.netbelasting_id} op {self.tijdstip_meting}"
-
-    class Meta:
-        verbose_name_plural = "Netbelastingen"
-
 class Operator(models.Model):
     medewerker_id = models.CharField(max_length=50, unique=True)
     naam = models.CharField(max_length=100)

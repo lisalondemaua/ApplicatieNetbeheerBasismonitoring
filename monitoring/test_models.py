@@ -8,7 +8,7 @@ import requests
 from django.test import TransactionTestCase
 from django.utils.dateparse import parse_datetime
 from model_bakery import baker
-from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting, Netbelasting, Operator, Rapport
+from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting, Operator, Rapport
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. GLOBALE VARIABELEN
@@ -125,7 +125,7 @@ class GenereerData(TransactionTestCase):
     def test_genereer_data(self):
 
         # ── Bestaande data verwijderen ────────────────────────────────────────
-        for model in [Meting, Netbelasting, Sensor, Meetparameter, Infrastructuur, Net, Operator, Rapport]:
+        for model in [Meting, Sensor, Meetparameter, Infrastructuur, Net, Operator, Rapport]:
             model.objects.all().delete()
             print(f"Alle objecten van {model.__name__} verwijderd.")
 
