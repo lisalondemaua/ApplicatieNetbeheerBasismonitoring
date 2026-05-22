@@ -14,7 +14,7 @@ import pandas as pd
 from datetime import timedelta
 from django.utils import timezone
 
-from .models import Meting, Afwijking, Sensor, Rapport, Net, Meetparameter, Infrastructuur
+from .models import Meting, Sensor, Rapport, Net, Meetparameter, Infrastructuur
 
 # LANDINGSPAGINA
 
@@ -286,8 +286,6 @@ class DashboardView(generic.TemplateView):
                 if row['is_teruglevering']:
                     dso_samenvatting[dso]["teruglevering"] += 1
 
-        afwijkingen = Afwijking.objects.select_related('meting__sensor').order_by('-begintijd')[:10]
-
         # TOTAL LOAD
         laatste_load_metingen = []
         totaal_load_mw = None
@@ -321,7 +319,6 @@ class DashboardView(generic.TemplateView):
             "laatste_metingen": meting_rows,
             "infeed_rows": infeed_rows,
             "dso_samenvatting": dso_samenvatting.items(),
-            "afwijkingen": afwijkingen,
             "freq_min": freq_min,
             "freq_max": freq_max,
             "net": net,
@@ -357,10 +354,8 @@ class SensorDetailView(generic.DetailView):
         freq_min = sensor.net.freq_min if sensor.net else 49.50
         freq_max = sensor.net.freq_max if sensor.net else 50.50
         metingen = sensor.metingen.order_by('-tijdstip')[:50]
-        afwijkingen = Afwijking.objects.filter(meting__sensor=sensor).order_by('-begintijd')
         context.update({
             'metingen': metingen,
-            'afwijkingen': afwijkingen,
             'freq_min': freq_min,
             'freq_max': freq_max,
         })

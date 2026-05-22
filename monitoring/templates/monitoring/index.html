@@ -51,23 +51,7 @@
                 Overzicht van alle sensoren
             </div>
         </a>
-
-        <a href="{% url 'monitoring:afwijkingen_lijst' %}"
-           style="display:block; background: var(--surface); border: 1px solid var(--border);
-                  border-radius: 6px; padding: 1.2rem; text-decoration: none;
-                  transition: border-color 0.2s;"
-           onmouseover="this.style.borderColor='var(--accent)'"
-           onmouseout="this.style.borderColor='var(--border)'">
-
-            <div style="font-family:var(--mono); font-size:20px; margin-bottom:6px;">⚠️</div>
-            <div style="font-family:var(--mono); font-size:12px; font-weight:700;
-                        color:var(--text); margin-bottom:4px;">
-                Afwijkingen
-            </div>
-            <div style="font-size:12px; color:var(--muted);">
-                Metingen buiten specificatie
-            </div>
-        </a>
+        
 
         <a href="{% url 'monitoring:rapport_lijst' %}"
            style="display:block; background: var(--surface); border: 1px solid var(--border);

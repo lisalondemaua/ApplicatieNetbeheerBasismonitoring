@@ -7,8 +7,8 @@ net = Recipe(
     net_id=seq('NET_', increment_by=1),
     type='Distributie',
     spanningsniveau=150.0,
-    freq_min=49.99,
-    freq_max=50.01,
+    freq_min=49.50,
+    freq_max=50.50,
 )
 
 # Infrastructuur
@@ -27,8 +27,8 @@ parameter_freq = Recipe(
     Meetparameter,
     naam="Frequentie",
     eenheid="Hz",
-    drempel_onder=49.8,
-    drempel_boven=50.2
+    drempel_onder=49.50,
+    drempel_boven=50.50
 )
 parameter_spanning = Recipe(
     Meetparameter,
@@ -82,14 +82,4 @@ rapport = Recipe(
     periode_start='2026-05-01T00:00:00Z',
     periode_einde='2026-05-02T00:00:00Z',
     inhoud="Automatisch gegenereerd testrapport.",
-)
-
-# Afwijking
-afwijking = Recipe(
-    Afwijking,
-    type="hoogspanningsdip",
-    omschrijving="Testafwijking door bakery",
-    duur=10.0,
-    begintijd='2026-05-01T11:00:00Z',
-    eindtijd='2026-05-01T11:00:10Z',
 )

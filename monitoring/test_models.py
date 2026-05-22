@@ -8,7 +8,7 @@ import requests
 from django.test import TransactionTestCase
 from django.utils.dateparse import parse_datetime
 from model_bakery import baker
-from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting, Netbelasting, Afwijking, Operator, Rapport
+from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting, Netbelasting, Operator, Rapport
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. GLOBALE VARIABELEN
@@ -67,36 +67,50 @@ def totalLoadAPI():
     ]
 
 
+from django.utils import timezone
+
 def infeedPerStationAPI():
     url = "https://opendata.elia.be/api/explore/v2.1/catalog/datasets/ods091/records"
-    params = {"limit": AMOUNT_INFEED_DATA}
+
+    params = {
+        "limit": AMOUNT_INFEED_DATA
+    }
 
     try:
-        with requests.get(url, params=params, timeout=30) as response:
-            if response.status_code == 200:
-                data = json.loads(response.text)
-            else:
-                print("Er trad een fout op bij het ophalen van de infeed-API.")
-                return []
+        response = requests.get(url, params=params, timeout=30)
+
+        if response.status_code != 200:
+            print("Fout bij ophalen API")
+            return
+
+        data = response.json()
+
     except requests.exceptions.RequestException as e:
-        print(f"Netwerkfout infeed-API: {e}")
-        return []
+        print(f"Netwerkfout: {e}")
+        return
 
-    return [
-        {
-            "ean":      r.get("eancode"),
-            "station":  r.get("station") or "",
-            "location": r.get("location") or "",
-            "region":   r.get("region") or "",
-            "dso":      r.get("dso") or "Onbekend",
-            "voltage":  r.get("voltagelevel"),
-            "tijdstip": r.get("datetime"),
-            "waarde":   r.get("infeedvalue"),
-        }
-        for r in data.get("results", [])
-        if r.get("eancode")
-    ]
+    now = timezone.now()
 
+    for r in data.get("results", []):
+
+        ean = r.get("eancode")
+
+        if not ean:
+            continue
+
+        sensor, created = Sensor.objects.get_or_create(
+            sensor_id=ean,
+            defaults={
+                "type": "Injectiestation",
+                "status": "actief"
+            }
+        )
+
+        Meting.objects.create(
+            sensor=sensor,
+            tijdstip=now,
+            infeed_value=r.get("infeedvalue") or 0
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. TESTKLASSE
@@ -111,8 +125,7 @@ class GenereerData(TransactionTestCase):
     def test_genereer_data(self):
 
         # ── Bestaande data verwijderen ────────────────────────────────────────
-        for model in [Meting, Netbelasting, Afwijking, Sensor, Meetparameter,
-                      Infrastructuur, Net, Operator, Rapport]:
+        for model in [Meting, Netbelasting, Sensor, Meetparameter, Infrastructuur, Net, Operator, Rapport]:
             model.objects.all().delete()
             print(f"Alle objecten van {model.__name__} verwijderd.")
 
@@ -230,54 +243,60 @@ class GenereerData(TransactionTestCase):
 
         # ── Infeed per station via API ────────────────────────────────────────
         infeed_data = infeedPerStationAPI()
+
+        if infeed_data is None:
+            print("\n--- Infeed per station (0 records) ---")
+            print("Infeed API ophalen faalde: infeedPerStationAPI() gaf None terug.")
+            infeed_data = []
+
         print(f"\n--- Infeed per station ({len(infeed_data)} records) ---")
         for r in infeed_data:
-            tijdstip = parse_datetime(r["tijdstip"]) if r["tijdstip"] else None
-            if tijdstip is None or r["waarde"] is None:
-                print(f"  EAN {r['ean']}: overgeslagen (geen tijdstip of waarde).")
+            tijdstip = parse_datetime(r["tijdstip"]) if r.get("tijdstip") else None
+            if tijdstip is None or r.get("waarde") is None:
+                print(f"  EAN {r.get('ean')}: overgeslagen (geen tijdstip of waarde).")
                 continue
 
-            net_id = f"ELIA_{r['voltage']}kV" if r["voltage"] else "ELIA_onbekend"
+            net_id = f"ELIA_{r.get('voltage')}kV" if r.get("voltage") else "ELIA_onbekend"
             net_infeed, _ = Net.objects.get_or_create(
                 net_id=net_id,
                 defaults={
                     "type": "Distributienet",
-                    "spanningsniveau": float(r["voltage"]) if r["voltage"] else 0.0,
+                    "spanningsniveau": float(r["voltage"]) if r.get("voltage") else 0.0,
                 }
             )
             infra_infeed, _ = Infrastructuur.objects.get_or_create(
-                infrastructuur_id=f"DSO_{r['dso']}",
+                infrastructuur_id=f"DSO_{r.get('dso')}",
                 defaults={
-                    "naam": r["dso"],
+                    "naam": r.get("dso"),
                     "type": "Distributiestation",
-                    "locatie": r["region"],
+                    "locatie": r.get("region"),
                     "status": "actief",
-                    "beheerder": r["dso"],
+                    "beheerder": r.get("dso"),
                 }
             )
 
             sensor_infeed, _ = Sensor.objects.update_or_create(
-                sensor_id=r["ean"],
+                sensor_id=r.get("ean"),
                 defaults={
                     "type": "Infeed-sensor",
                     "net": net_infeed,
                     "infrastructuur": infra_infeed,
                     "communicatie_protocol": "N.v.t.",
                     "status": "actief",
-                    "station": r["station"],
-                    "location": r["location"],
-                    "region": r["region"],
+                    "station": r.get("station"),
+                    "location": r.get("location"),
+                    "region": r.get("region"),
                 }
             )
             baker.make_recipe(
-                'monitoring.meting',
+                "monitoring.meting",
                 sensor=sensor_infeed,
                 parameter=param_infeed,
                 tijdstip=tijdstip,
                 waarde=r["waarde"],
                 kwaliteit="teruglevering" if r["waarde"] < 0 else "in_spec",
             )
-            print(f"  EAN {r['ean']} → {r['waarde']} MW")
+            print(f"  EAN {r.get('ean')} → {r['waarde']} MW")
 
         # ── Opvuldata: operators, rapporten, afwijkingen ──────────────────────
         print("\n--- Overige objecten via baker_recipes ---")

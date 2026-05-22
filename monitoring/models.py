@@ -53,7 +53,6 @@ class Sensor(models.Model):
     class Meta:
         verbose_name_plural = "Sensoren"
 
-
 class Meetparameter(models.Model):
     naam = models.CharField(max_length=32)
     eenheid = models.CharField(max_length=10)
@@ -69,23 +68,19 @@ class Meetparameter(models.Model):
 
 class Meting(models.Model):
     meting_id = models.AutoField(primary_key=True) # AutoField zorgt ervoor dat dit veld automatisch een unieke waarde krijgt bij het aanmaken van een nieuwe meting, primary_key=True maakt dit veld de primaire sleutel van het model
-    tijdstip = models.DateTimeField()
+    tijdstip = models.DateTimeField(auto_now_add=True)
     waarde = models.FloatField()
     kwaliteit = models.CharField(max_length=20, default='in_spec')
-    sensor = models.ForeignKey(Sensor, on_delete=models.CASCADE, related_name="metingen", blank=True, null=True)
+    sensor = models.ForeignKey(Sensor, on_delete=models.CASCADE, related_name="metingen", null=True, blank=True)
     parameter = models.ForeignKey(Meetparameter, on_delete=models.CASCADE, related_name="metingen", blank=True, null=True)
+    infeed_value = models.FloatField(default=0)
 
     def __str__(self):
         return f"Meting {self.meting_id}: {self.waarde} @ {self.tijdstip}"
 
-    @property # maakt deze methode toegankelijk als een attribuut in plaats van een methode, zodat je bijvoorbeeld meting.buiten_spec in plaats van meting.buiten_spec() kunt gebruiken
-    def buiten_spec(self):
-        if not self.parameter:
-            return False
-        return self.waarde < self.parameter.drempel_onder or self.waarde > self.parameter.drempel_boven
-
     class Meta:
         verbose_name_plural = "Metingen"
+        ordering = ["-tijdstip"]
 
 
 class Netbelasting(models.Model):
@@ -100,23 +95,6 @@ class Netbelasting(models.Model):
 
     class Meta:
         verbose_name_plural = "Netbelastingen"
-
-
-class Afwijking(models.Model):
-    afwijking_id = models.AutoField(primary_key=True)
-    meting = models.ForeignKey(Meting, on_delete=models.CASCADE, related_name="afwijkingen", blank=True, null=True)
-    type = models.CharField(max_length=50)
-    omschrijving = models.CharField(max_length=200)
-    duur = models.FloatField(null=True, blank=True)
-    begintijd = models.DateTimeField(null=True, blank=True)
-    eindtijd = models.DateTimeField(null=True, blank=True)
-
-    def __str__(self):
-        return f"Afwijking {self.type}"
-
-    class Meta:
-        verbose_name_plural = "Afwijkingen"
-
 
 class Operator(models.Model):
     medewerker_id = models.CharField(max_length=50, unique=True)
