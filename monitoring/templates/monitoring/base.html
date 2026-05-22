@@ -309,12 +309,18 @@
     <ul class="nav-links">
         <li><a href="{% url 'monitoring:dashboard' %}">Dashboard</a></li>
         <li><a href="{% url 'monitoring:sensor_lijst' %}">Sensoren</a></li>
-        <li><a href="{% url 'monitoring:afwijkingen_lijst' %}">Afwijkingen</a></li>
         <li><a href="{% url 'monitoring:rapport_lijst' %}">Rapporten</a></li>
     </ul>
 </nav>
 
 <div class="page-wrapper">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% else %}alert-info{% endif %}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
     {% block content %}{% endblock %}
 </div>
 

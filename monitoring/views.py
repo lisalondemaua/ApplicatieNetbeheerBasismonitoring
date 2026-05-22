@@ -3,7 +3,8 @@ import json
 
 from django.views import generic
 from django.db.models import Q, Count
-from django.shortcuts import render
+from django.shortcuts import render, redirect
+from django.contrib import messages
 from django.utils.dateparse import parse_datetime
 from bokeh.plotting import figure
 from bokeh.embed import components
@@ -335,7 +336,7 @@ class DashboardView(generic.TemplateView):
 
         return context
 
-# SENSOREN (ListView + DetailView)
+# SENSOREN (ListView)
 
 class SensorListView(generic.ListView):
     template_name = 'monitoring/sensor_lijst.html'
@@ -362,30 +363,6 @@ class SensorDetailView(generic.DetailView):
             'afwijkingen': afwijkingen,
             'freq_min': freq_min,
             'freq_max': freq_max,
-        })
-        return context
-
-# AFWIJKINGEN (ListView)
-
-class AfwijkingenListView(generic.ListView):
-    template_name = 'monitoring/afwijkingen_lijst.html'
-    context_object_name = 'afwijkingen'
-
-    def get_queryset(self):
-        net = Net.objects.first()
-        freq_min = net.freq_min if net else 49.50
-        freq_max = net.freq_max if net else 50.50
-        return Meting.objects.filter(
-            Q(waarde__lt=freq_min) | Q(waarde__gt=freq_max)
-        ).select_related('sensor').order_by('-tijdstip')
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        net = Net.objects.first()
-        context.update({
-            "freq_min": net.freq_min if net else 49.50,
-            "freq_max": net.freq_max if net else 50.50,
-            "net": net,
         })
         return context
 
@@ -421,11 +398,11 @@ def importeer_sensors_api_view(request):
             if response.status_code == 200:
                 data = response.json()
             else:
-                return render(request, "monitoring/import_resultaat.html", {
-                    "message": "API call mislukt met status: " + str(response.status_code)
-                })
+                messages.error(request, "API call mislukt met status: " + str(response.status_code))
+                return redirect("monitoring:dashboard")
     except Exception as e:
-        return render(request, "monitoring/import_resultaat.html", {"message": f"Fout tijdens API call: {e}"})
+        messages.error(request, f"Fout tijdens API call: {e}")
+        return redirect("monitoring:dashboard")
 
     resultaten = data.get("results", [])
     for r in resultaten:
@@ -472,7 +449,12 @@ def importeer_sensors_api_view(request):
         except Exception as e:
             fouten.append(f"Sensor {ean}: {e}")
 
-    return render(request, "monitoring/import_resultaat.html", {
-        "message": f"Import klaar. Aangemaakt: {aantal_aangemaakt}, Bijgewerkt: {aantal_bijgewerkt}, Fouten: {len(fouten)}",
-        "fouten": fouten,
-    })
+    if fouten:
+        for fout in fouten:
+            messages.warning(request, fout)
+    messages.success(
+        request,
+        f"Import klaar. Aangemaakt: {aantal_aangemaakt}, Bijgewerkt: {aantal_bijgewerkt}, Fouten: {len(fouten)}",
+    )
+    return redirect("monitoring:dashboard")
+
