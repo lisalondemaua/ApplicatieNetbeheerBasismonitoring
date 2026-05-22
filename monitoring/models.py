@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 class Net(models.Model):
     net_id = models.CharField(max_length=50, unique=True) # unique=True zodat er geen dubbele netten kunnen worden aangemaakt
@@ -54,7 +55,7 @@ class Sensor(models.Model):
         verbose_name_plural = "Sensoren"
 
 class Meetparameter(models.Model):
-    naam = models.CharField(max_length=32)
+    naam = models.CharField(max_length=32, unique=True)
     eenheid = models.CharField(max_length=10)
     drempel_onder = models.FloatField()
     drempel_boven = models.FloatField()
@@ -68,12 +69,11 @@ class Meetparameter(models.Model):
 
 class Meting(models.Model):
     meting_id = models.AutoField(primary_key=True) # AutoField zorgt ervoor dat dit veld automatisch een unieke waarde krijgt bij het aanmaken van een nieuwe meting, primary_key=True maakt dit veld de primaire sleutel van het model
-    tijdstip = models.DateTimeField(auto_now_add=True)
+    tijdstip = models.DateTimeField(default=timezone.now, db_index=True)
     waarde = models.FloatField()
     kwaliteit = models.CharField(max_length=20, default='in_spec')
-    sensor = models.ForeignKey(Sensor, on_delete=models.CASCADE, related_name="metingen", null=True, blank=True)
-    parameter = models.ForeignKey(Meetparameter, on_delete=models.CASCADE, related_name="metingen", blank=True, null=True)
-    infeed_value = models.FloatField(default=0)
+    sensor = models.ForeignKey(Sensor, on_delete=models.CASCADE, related_name="metingen", default=0)
+    parameter = models.ForeignKey(Meetparameter, on_delete=models.CASCADE, related_name="metingen", default="")
 
     def __str__(self):
         return f"Meting {self.meting_id}: {self.waarde} @ {self.tijdstip}"

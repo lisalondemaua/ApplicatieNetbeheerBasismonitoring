@@ -30,18 +30,6 @@ class DashboardView(generic.TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        # ── TOTAAL AANTAL SENSOREN VAN ELIA API ──────────────────────────────
-        url_sensoren = "https://opendata.elia.be/api/explore/v2.1/catalog/datasets/ods091/records"
-        sensoren_totaal = 0
-        try:
-            api_response = requests.get(url_sensoren, params={"limit": 1, "offset": 0})
-            if api_response.status_code == 200:
-                sensoren_totaal = api_response.json().get("total_count", 0)
-            else:
-                print("Kon sensoren totaal niet ophalen van API:", api_response.status_code)
-        except Exception as e:
-            print("Fout tijdens API-call voor sensoren totaal:", e)
-
         # ── FREQUENTIES OPHALEN ──────────────────────────────────────────────
         url_frequentie = "https://opendata.elia.be/api/records/1.0/search/"
 
@@ -260,14 +248,21 @@ class DashboardView(generic.TemplateView):
                     waarde = None
 
                 infeed_rows.append({
+                    # Velden zoals in jouw tabel/API-output
+                    "ean_code": sensor_id or "–",
+                    "region": m.sensor.region if m.sensor else "–",
+                    "location": m.sensor.location if m.sensor else "–",
+                    "injection_station": m.sensor.station if m.sensor else "–",
+                    "dso": m.sensor.infrastructuur.naam if m.sensor and m.sensor.infrastructuur else "–",
+                    "voltage_level": m.sensor.net.spanningsniveau if m.sensor and m.sensor.net else "–",
+                    "infeed_value": waarde,
+
+                    # Extra velden (handig voor je UI)
                     "tijdstip": m.tijdstip,
                     "waarde": waarde,
                     "is_teruglevering": waarde is not None and waarde < 0,
                     "sensor_id": sensor_id or "–",
                     "station": m.sensor.station if m.sensor else "–",
-                    "location": m.sensor.location if m.sensor else "–",
-                    "region": m.sensor.region if m.sensor else "–",
-                    "dso": m.sensor.infrastructuur.naam if m.sensor and m.sensor.infrastructuur else "–",
                     "voltagelevel": m.sensor.net.spanningsniveau if m.sensor and m.sensor.net else "–",
                 })
 
@@ -315,6 +310,9 @@ class DashboardView(generic.TemplateView):
                     totaal_load_mw = float(load_qs.first().waarde)
                 except (TypeError, ValueError):
                     totaal_load_mw = None
+
+        # FIX: sensoren_totaal was niet gedefinieerd en veroorzaakte een crash
+        sensoren_totaal = Sensor.objects.count()
 
         context.update({
             "laatste_metingen": meting_rows,
@@ -449,6 +447,15 @@ def importeer_sensors_api_view(request):
                     "beheerder": r.get('dso') or "Onbekend",
                 }
             )
+
+            # "Injection Station" correct binnenhalen (met fallbacks)
+            injection_station = (
+                r.get("injectionstation")
+                or r.get("injection_station")
+                or r.get("station")
+                or ""
+            )
+
             obj, created = Sensor.objects.update_or_create(
                 sensor_id=ean,
                 defaults={
@@ -457,7 +464,7 @@ def importeer_sensors_api_view(request):
                     "infrastructuur": infra_infeed,
                     "communicatie_protocol": "N.v.t.",
                     "status": "actief",
-                    "station": r.get("station") or "",
+                    "station": injection_station,
                     "location": r.get("location") or "",
                     "region": r.get("region") or "",
                 }
