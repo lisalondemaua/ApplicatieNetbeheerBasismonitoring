@@ -15,16 +15,12 @@
         {% endif %}
     </p>
 
-
-    <p>Spanningsniveau: {{ sensor.net.spanningsniveau }} kV</p>
-</div>
-
-<div class="alert alert-info">
-    Frequentiegrenzen: <strong>{{ freq_min }} Hz</strong> – <strong>{{ freq_max }} Hz</strong>
+    <p>Constant spanningsniveau: {{ sensor.net.spanningsniveau }} kV</p>
 </div>
 
 <div class="card">
-    <div class="card-title">Laatste meting</div>
+    <div class="card-title">Laatste metingen</div>
+
     {% if metingen %}
     <table>
         <thead>
@@ -33,8 +29,6 @@
                 <th>Parameter</th>
                 <th>Waarde</th>
                 <th>Eenheid</th>
-                <th>Kwaliteit / Status</th>
-                <th>Status</th>
             </tr>
         </thead>
         <tbody>
@@ -42,22 +36,8 @@
             <tr>
                 <td>{{ m.tijdstip|date:"d-m-Y H:i:s" }}</td>
                 <td>{{ m.parameter_naam }}</td>
-                <td class="{% if m.is_frequentie %}{% if m.freq_in_spec %}freq-ok{% else %}freq-danger{% endif %}{% endif %}">
-                    {{ m.waarde|floatformat:4 }}
-                </td>
+                <td>{{ m.waarde|floatformat:4 }}</td>
                 <td>{{ m.eenheid|default:"-" }}</td>
-                <td style="color:var(--muted); font-size:12px;">{{ m.kwaliteit }}</td>
-                <td>
-                    {% if m.is_frequentie %}
-                        {% if m.freq_in_spec %}
-                            <span class="badge badge-ok">OK</span>
-                        {% else %}
-                            <span class="badge badge-danger">Afwijking</span>
-                        {% endif %}
-                    {% else %}
-                        <span class="badge badge-warn">N.v.t.</span>
-                    {% endif %}
-                </td>
             </tr>
         {% endfor %}
         </tbody>
@@ -67,20 +47,35 @@
     {% endif %}
 </div>
 
+{% if bokeh_div %}
 <div class="card">
-    <div class="card-title">Afwijkingen voor deze sensor</div>
-    {% if afwijkingen %}
-    <ul class="result-list">
-        {% for afw in afwijkingen %}
-        <li>
-            <span style="color:var(--muted); font-family:var(--mono); font-size:11px;">{{ afw.begintijd|date:"d-m-Y H:i" }}</span>
-            <span class="badge badge-danger">{{ afw.type }}</span>
-            {{ afw.omschrijving }}
-        </li>
-        {% endfor %}
-    </ul>
-    {% else %}
-    <div class="empty-state">Geen afwijkingen voor deze sensor.</div>
+    <div class="card-title">Analyse (laatste 7 dagen)</div>
+
+    {% if analyse.aantal_metingen_7d %}
+    <div style="display:flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+        <div style="background: var(--surface, #f5f5f5); border-radius: 8px; padding: .8rem 1.2rem; min-width: 160px;">
+            <div style="font-size: 12px; color: var(--muted, #888); margin-bottom: 4px;">Laatste waarde</div>
+            <div style="font-size: 22px; font-weight: 500;">{{ analyse.laatste_waarde|floatformat:3 }} MW</div>
+            <div style="font-size: 11px; color: var(--muted, #888);">{{ analyse.laatste_tijdstip|date:"d-m-Y H:i" }}</div>
+        </div>
+
+        <div style="background: var(--surface, #f5f5f5); border-radius: 8px; padding: .8rem 1.2rem; min-width: 160px;">
+            <div style="font-size: 12px; color: var(--muted, #888); margin-bottom: 4px;">Min / Max (7d)</div>
+            <div style="font-size: 14px;">{{ analyse.min|floatformat:3 }} – {{ analyse.max|floatformat:3 }} MW</div>
+            <div style="font-size: 12px; color: var(--muted, #888); margin-top: 4px;">Gemiddelde: {{ analyse.gemiddelde|floatformat:3 }} MW</div>
+        </div>
+
+        <div style="background: var(--surface, #f5f5f5); border-radius: 8px; padding: .8rem 1.2rem; min-width: 160px;">
+            <div style="font-size: 12px; color: var(--muted, #888); margin-bottom: 4px;">Metingen</div>
+            <div style="font-size: 22px; font-weight: 500;">{{ analyse.aantal_metingen_7d }}</div>
+            <div style="font-size: 12px; color: var(--muted, #888); margin-top: 4px;">Teruglevering: {{ analyse.teruglevering_pct|floatformat:1 }}%</div>
+        </div>
+    </div>
     {% endif %}
+
+    {{ bokeh_script|safe }}
+    {{ bokeh_div|safe }}
 </div>
+{% endif %}
+
 {% endblock %}

@@ -2,8 +2,10 @@
 # 1. IMPORTS
 # ─────────────────────────────────────────────────────────────────────────────
 import json
+import math
 import random
 import requests
+
 from datetime import timedelta
 
 from django.test import TransactionTestCase
@@ -11,7 +13,16 @@ from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
 from model_bakery import baker
-from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting, Operator, Rapport
+
+from monitoring.models import (
+    Net,
+    Infrastructuur,
+    Sensor,
+    Meetparameter,
+    Meting,
+    Operator,
+    Rapport,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. GLOBALE VARIABELEN
@@ -19,19 +30,79 @@ from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting
 AMOUNT_GENERATED_DATA = 20
 AMOUNT_INFEED_DATA = 500
 
-AANTAL_METINGEN_PER_SENSOR = 24
-INTERVAL_MINUTEN = 15
-MIN_INFEED_MW = -20.0
-MAX_INFEED_MW = 50.0
+# Kies uurlijkse data voor 7 dagen (minder punten, sneller, toch mooie grafiek)
+AANTAL_METINGEN_PER_SENSOR = 7 * 24   # 168 metingen per sensor
+INTERVAL_MINUTEN = 60                 # 1 meting per uur
+
+# Beperk aantal infeed-stations zodat tests/DB niet te zwaar worden
+MAX_INFEED_STATIONS = 30
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. FUNCTIES OM DATA TE IMPORTEREN VIA API
+# 3. REALISTISCHE INFEED GENERATIE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_realistic_infeed(voltage_kv, hour):
+    """
+    Genereert realistische MW-infeed op basis van:
+    - spanningsniveau
+    - tijdstip van de dag
+    - willekeurige variatie
+
+    Conventie (zoals je UI eerder gebruikte):
+    - negatief = teruglevering/injectie
+    - positief = afname/consumptie
+    """
+
+    # Dagcurve (nacht lager, overdag hoger) — blijft altijd positief (0.2..1.0)
+    daily_factor = 0.6 + 0.4 * math.sin((hour - 6) / 24 * 2 * math.pi)
+
+    # ── Laagspanning ────────────────────────────────────────────────────────
+    if voltage_kv <= 1:
+        base = random.uniform(-0.2, 0.5)
+
+    # ── Middenspanning (6-15 kV) ────────────────────────────────────────────
+    elif voltage_kv <= 15:
+        # Middag = mogelijk sterke PV-injectie (negatief)
+        if 11 <= hour <= 15:
+            base = random.uniform(-20, 10)
+        else:
+            base = random.uniform(-5, 15)
+
+    # ── Regionale hoogspanning (30-70 kV) ───────────────────────────────────
+    elif voltage_kv <= 70:
+        base = random.uniform(20, 100)
+
+    # ── 110-150 kV ──────────────────────────────────────────────────────────
+    elif voltage_kv <= 150:
+        base = random.uniform(100, 500)
+
+    # ── 220-380 kV transmissie ──────────────────────────────────────────────
+    else:
+        # Iets gematigder dan 3000 MW om realistischer te blijven per "node"
+        base = random.uniform(200, 1200)
+
+    # Willekeurige ruis (10% van de grootte)
+    noise = random.uniform(-0.1, 0.1) * abs(base)
+
+    value = (base * daily_factor) + noise
+    return round(value, 3)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. FUNCTIES OM DATA TE IMPORTEREN VIA API
 # ─────────────────────────────────────────────────────────────────────────────
 
 def frequentieAPI():
+
     url = "https://opendata.elia.be/api/records/1.0/search/"
-    params = {"dataset": "ods057", "rows": AMOUNT_GENERATED_DATA, "sort": "datetime"}
+    params = {
+        "dataset": "ods057",
+        "rows": AMOUNT_GENERATED_DATA,
+        "sort": "datetime"
+    }
+
     with requests.get(url, params=params) as response:
+
         if response.status_code == 200:
             data = json.loads(response.text)
         else:
@@ -44,16 +115,31 @@ def frequentieAPI():
             "waarde": record.get("fields", {}).get("actualfrequency"),
         }
         for record in data.get("records", [])
-        if record.get("fields", {}).get("datetime") and record.get("fields", {}).get("actualfrequency") is not None
+        if record.get("fields", {}).get("datetime")
+        and record.get("fields", {}).get("actualfrequency") is not None
     ]
 
 
 def totalLoadAPI():
-    url = "https://opendata.elia.be/api/explore/v2.1/catalog/datasets/ods001/records"
-    params = {"limit": AMOUNT_GENERATED_DATA}
-    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
-    with requests.get(url, params=params, headers=headers, timeout=30) as response:
+    url = "https://opendata.elia.be/api/explore/v2.1/catalog/datasets/ods001/records"
+
+    params = {
+        "limit": AMOUNT_GENERATED_DATA
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
+    }
+
+    with requests.get(
+        url,
+        params=params,
+        headers=headers,
+        timeout=30
+    ) as response:
+
         if response.status_code == 200:
             data = json.loads(response.text)
         else:
@@ -61,7 +147,10 @@ def totalLoadAPI():
             return []
 
     return [
-        {"tijdstip": r.get("datetime"), "waarde": r.get("totalload")}
+        {
+            "tijdstip": r.get("datetime"),
+            "waarde": r.get("totalload")
+        }
         for r in data.get("results", [])
         if r.get("datetime") and r.get("totalload") is not None
     ]
@@ -70,24 +159,40 @@ def totalLoadAPI():
 def infeedPerStationAPI():
     """
     Haalt sensor-metadata op uit ods091.
-    Returnt een lijst dicts. Maakt GEEN objecten aan in de DB.
+    Returnt een lijst dicts.
     """
+
     url = "https://opendata.elia.be/api/explore/v2.1/catalog/datasets/ods091/records"
-    params = {"limit": AMOUNT_INFEED_DATA}
+
+    params = {
+        "limit": AMOUNT_INFEED_DATA
+    }
 
     try:
-        response = requests.get(url, params=params, timeout=30)
+
+        response = requests.get(
+            url,
+            params=params,
+            timeout=30
+        )
+
         if response.status_code != 200:
             print("Fout bij ophalen API")
             return []
+
         data = response.json()
+
     except requests.exceptions.RequestException as e:
+
         print(f"Netwerkfout: {e}")
         return []
 
     resultaten = []
+
     for r in data.get("results", []):
+
         ean = r.get("eancode")
+
         if not ean:
             continue
 
@@ -95,37 +200,50 @@ def infeedPerStationAPI():
             "ean": ean,
             "region": r.get("region") or "",
             "location": r.get("location") or "",
-            "station": r.get("injectionstation") or r.get("injection_station") or r.get("station") or "",
+            "station": (
+                r.get("injectionstation")
+                or r.get("injection_station")
+                or r.get("station")
+                or ""
+            ),
             "dso": r.get("dso") or "Onbekend",
             "voltagelevel": r.get("voltagelevel"),
         })
+
     return resultaten
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. TESTKLASSE
+# 5. TESTKLASSE
 # ─────────────────────────────────────────────────────────────────────────────
 
 class GenereerData(TransactionTestCase):
+
     databases = ["default"]
 
     def test_genereer_data(self):
 
-        # ── Bestaande data verwijderen (BELANGRIJK: sensoren behouden) ───────
+        # ── Bestaande data verwijderen ───────────────────────────────────────
         Meting.objects.all().delete()
         Operator.objects.all().delete()
         Rapport.objects.all().delete()
-        print("Metingen/rapporten/operators verwijderd. Sensoren blijven behouden.")
 
-        print("Data generatie gestart, even geduld...")
+        print("Metingen/rapporten/operators verwijderd.")
+        print("Sensoren blijven behouden.")
 
-        # ── Vaste structuurobjecten: frequentie ───────────────────────────────
+        print("\nData generatie gestart...\n")
+
+        # ─────────────────────────────────────────────────────────────────────
+        # FREQUENTIE SENSOR
+        # ─────────────────────────────────────────────────────────────────────
+
         net_freq = baker.make_recipe(
             "monitoring.net",
             net_id="ELIA_NET",
             type="Transmissienet",
             spanningsniveau=380.0,
         )
+
         infra_freq = baker.make_recipe(
             "monitoring.infra",
             infrastructuur_id="NATIONAAL",
@@ -135,6 +253,7 @@ class GenereerData(TransactionTestCase):
             status="actief",
             beheerder="Elia",
         )
+
         sensor_freq = baker.make_recipe(
             "monitoring.sensor",
             sensor_id="ELIA-NATIONAAL",
@@ -144,18 +263,27 @@ class GenereerData(TransactionTestCase):
             communicatie_protocol="N.v.t.",
             status="actief",
         )
+
         param_freq, _ = Meetparameter.objects.get_or_create(
             naam="frequentie",
-            defaults={"eenheid": "Hz", "drempel_onder": 49.5, "drempel_boven": 50.5},
+            defaults={
+                "eenheid": "Hz",
+                "drempel_onder": 49.5,
+                "drempel_boven": 50.5,
+            },
         )
 
-        # ── Vaste structuurobjecten: total load ───────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+        # TOTAL LOAD SENSOR
+        # ─────────────────────────────────────────────────────────────────────
+
         net_load = baker.make_recipe(
             "monitoring.net",
             net_id="ELIA_LOAD_NET",
             type="Transmissienet",
             spanningsniveau=380.0,
         )
+
         infra_load = baker.make_recipe(
             "monitoring.infra",
             infrastructuur_id="NATIONAAL_LOAD",
@@ -165,6 +293,7 @@ class GenereerData(TransactionTestCase):
             status="actief",
             beheerder="Elia",
         )
+
         sensor_load = baker.make_recipe(
             "monitoring.sensor",
             sensor_id="ELIA-LOAD",
@@ -174,24 +303,44 @@ class GenereerData(TransactionTestCase):
             communicatie_protocol="N.v.t.",
             status="actief",
         )
+
         param_load, _ = Meetparameter.objects.get_or_create(
             naam="totalload",
-            defaults={"eenheid": "MW", "drempel_onder": 0.0, "drempel_boven": 15000.0},
+            defaults={
+                "eenheid": "MW",
+                "drempel_onder": 0.0,
+                "drempel_boven": 15000.0,
+            },
         )
 
-        # ── Meetparameter infeed ──────────────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+        # INFEED PARAMETER
+        # ─────────────────────────────────────────────────────────────────────
+
         param_infeed, _ = Meetparameter.objects.get_or_create(
             naam="infeedvalue",
-            defaults={"eenheid": "MW", "drempel_onder": -500.0, "drempel_boven": 500.0},
+            defaults={
+                "eenheid": "MW",
+                "drempel_onder": -5000.0,
+                "drempel_boven": 10000.0,
+            },
         )
 
-        # ── Frequentie-metingen via API ───────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+        # FREQUENTIE DATA
+        # ─────────────────────────────────────────────────────────────────────
+
         freq_data = frequentieAPI()
-        print(f"\n--- Frequentie-metingen ({len(freq_data)} records) ---")
+
+        print(f"Frequentie records: {len(freq_data)}")
+
         for item in freq_data:
+
             tijdstip = parse_datetime(item["tijdstip"])
+
             if tijdstip is None:
                 continue
+
             baker.make_recipe(
                 "monitoring.meting",
                 sensor=sensor_freq,
@@ -201,41 +350,85 @@ class GenereerData(TransactionTestCase):
                 kwaliteit="in_spec",
             )
 
-        # ── Total-load-metingen via API ───────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+        # TOTAL LOAD DATA
+        # ─────────────────────────────────────────────────────────────────────
+
         load_data = totalLoadAPI()
-        print(f"\n--- Total load-metingen ({len(load_data)} records) ---")
+
+        print(f"Total load records: {len(load_data)}")
+
         for item in load_data:
+
             tijdstip = parse_datetime(item["tijdstip"])
+
             if tijdstip is None:
                 continue
+
+            waarde = float(item["waarde"])
+
             baker.make_recipe(
                 "monitoring.meting",
                 sensor=sensor_load,
                 parameter=param_load,
                 tijdstip=tijdstip,
-                waarde=float(item["waarde"]),
-                kwaliteit="in_spec" if float(item["waarde"]) < 15000 else "waarschuwing",
+                waarde=waarde,
+                kwaliteit=(
+                    "in_spec"
+                    if waarde < 15000
+                    else "waarschuwing"
+                ),
             )
 
-        # ── Infeed: gebruik bestaande (API) sensoren + genereer meerdere waarden ──
+        # ─────────────────────────────────────────────────────────────────────
+        # INFEED DATA
+        # ─────────────────────────────────────────────────────────────────────
+
         api_sensors = infeedPerStationAPI()
-        print(f"\n--- Infeed stations metadata uit API ({len(api_sensors)} records) ---")
+        api_sensors = api_sensors[:MAX_INFEED_STATIONS]
+
+        print(f"Infeed stations gebruikt: {len(api_sensors)} (max {MAX_INFEED_STATIONS})")
 
         start = timezone.now()
 
         for r in api_sensors:
-            # Zorg dat de sensor in DB bestaat + metadata heeft (update_or_create)
+
             voltage = r.get("voltagelevel")
+
             try:
-                voltage_float = float(str(voltage).replace("kV", "").replace("KV", "").strip()) if voltage else 0.0
+                voltage_str = str(voltage).replace(",", ".") if voltage else ""
+                voltage_float = float(
+                    voltage_str
+                    .replace("kV", "")
+                    .replace("KV", "")
+                    .strip()
+                ) if voltage_str else 0.0
+
             except ValueError:
                 voltage_float = 0.0
 
-            net_id = f"ELIA_{voltage_float}kV" if voltage_float else "ELIA_onbekend"
+            # ── NET ──────────────────────────────────────────────────────────
+
+            net_id = (
+                f"ELIA_{voltage_float}kV"
+                if voltage_float
+                else "ELIA_onbekend"
+            )
+
             net_infeed, _ = Net.objects.get_or_create(
                 net_id=net_id,
-                defaults={"type": "Distributienet", "spanningsniveau": voltage_float},
+                defaults={
+                    "type": (
+                        "Transmissienet"
+                        if voltage_float >= 110
+                        else "Distributienet"
+                    ),
+                    "spanningsniveau": voltage_float,
+                },
             )
+
+            # ── INFRASTRUCTUUR ───────────────────────────────────────────────
+
             infra_infeed, _ = Infrastructuur.objects.get_or_create(
                 infrastructuur_id=f"DSO_{r.get('dso')}",
                 defaults={
@@ -246,6 +439,8 @@ class GenereerData(TransactionTestCase):
                     "beheerder": r.get("dso"),
                 },
             )
+
+            # ── SENSOR ───────────────────────────────────────────────────────
 
             sensor_infeed, _ = Sensor.objects.update_or_create(
                 sensor_id=r.get("ean"),
@@ -261,10 +456,36 @@ class GenereerData(TransactionTestCase):
                 },
             )
 
-            # Maak meerdere metingen per sensor (zelf gegenereerde waarden)
-            tijden = [start - timedelta(minutes=INTERVAL_MINUTEN * i) for i in range(AANTAL_METINGEN_PER_SENSOR)]
-            basis = random.uniform(MIN_INFEED_MW, MAX_INFEED_MW)
-            waarden = [round(basis + random.uniform(-1.0, 1.0), 3) for _ in range(AANTAL_METINGEN_PER_SENSOR)]
+            # ─────────────────────────────────────────────────────────────────
+            # REALISTISCHE METINGEN GENEREREN (uurlijkse metingen over 7 dagen)
+            # ─────────────────────────────────────────────────────────────────
+
+            tijden = []
+            waarden = []
+            kwaliteiten = []
+
+            for i in range(AANTAL_METINGEN_PER_SENSOR):
+
+                timestamp = (
+                    start
+                    - timedelta(minutes=INTERVAL_MINUTEN * i)
+                )
+
+                waarde = generate_realistic_infeed(
+                    voltage_float,
+                    timestamp.hour
+                )
+
+                tijden.append(timestamp)
+                waarden.append(waarde)
+
+                # kwaliteitslabel
+                if abs(waarde) > 5000:
+                    kwaliteiten.append("kritiek")
+                elif abs(waarde) > 1000:
+                    kwaliteiten.append("waarschuwing")
+                else:
+                    kwaliteiten.append("in_spec")
 
             baker.make_recipe(
                 "monitoring.meting",
@@ -273,13 +494,37 @@ class GenereerData(TransactionTestCase):
                 parameter=param_infeed,
                 tijdstip=tijden,
                 waarde=waarden,
-                kwaliteit="in_spec",
+                kwaliteit=kwaliteiten,
             )
 
-        # ── Opvuldata: operators, rapporten ──────────────────────
-        print("\n--- Overige objecten via baker_recipes ---")
+            print(
+                f"Sensor {sensor_infeed.sensor_id} "
+                f"({voltage_float} kV) "
+                f"=> {len(waarden)} metingen"
+            )
+
+        # ─────────────────────────────────────────────────────────────────────
+        # OVERIGE DATA
+        # ─────────────────────────────────────────────────────────────────────
+
+        print("\nOperators en rapporten genereren...\n")
+
         for i in range(AMOUNT_GENERATED_DATA):
-            operator = baker.make_recipe("monitoring.operator")
-            baker.make_recipe("monitoring.rapport", operator=operator)
-            _ = random.choice(Meting.objects.all())
-            print(f"  Operator/Rapport {i + 1}/{AMOUNT_GENERATED_DATA} aangemaakt.")
+
+            operator = baker.make_recipe(
+                "monitoring.operator"
+            )
+
+            baker.make_recipe(
+                "monitoring.rapport",
+                operator=operator
+            )
+
+            print(
+                f"Operator/Rapport "
+                f"{i + 1}/{AMOUNT_GENERATED_DATA}"
+            )
+
+        # ─────────────────────────────────────────────────────────────────────
+
+        print("\nDatageneratie voltooid.\n")

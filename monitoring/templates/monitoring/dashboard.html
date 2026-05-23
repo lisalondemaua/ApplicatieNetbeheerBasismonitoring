@@ -1,11 +1,11 @@
 {% extends "monitoring/base.html" %}
 
-{% block title %}Dashboard — Netkwaliteit{% endblock %}
+{% block title %}Dashboard — Basismonitoring Netkwaliteit{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <h1>Dashboard</h1>
-    <p>Laatste frequentiemetingen en recente afwijkingen</p>
+    <p>Overzicht van de laatste frequentiemetingen, infeed en terugleveringen</p>
 </div>
 
 <div class="alert alert-info">
@@ -18,7 +18,7 @@
 {# ------------------------------------------------------------------ #}
 {% if infeed_rows %}
 <div class="card">
-    <div class="card-title">Infeed overzicht (Elia ods091 — laatste meting per station)</div>
+    <div class="card-title">Infeed overzicht (laatste meting per station)</div>
 
     <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
         <div style="background: var(--surface, #f5f5f5); border-radius: 8px; padding: 1rem 1.5rem; min-width: 160px;">
@@ -133,7 +133,7 @@
 {# FREQUENTIEMETINGEN                                                #}
 {# ------------------------------------------------------------------ #}
 <div class="card">
-    <div class="card-title">Laatste 20 metingen</div>
+    <div class="card-title">Laatste 20 frequentiemetingen</div>
 
     {% if laatste_metingen %}
     <table>
@@ -168,34 +168,4 @@
     <div class="empty-state">Geen metingen gevonden.</div>
     {% endif %}
 </div>
-
-{# ------------------------------------------------------------------ #}
-{# LOAD METINGEN                                                      #}
-{# ------------------------------------------------------------------ #}
-{% if laatste_load_metingen %}
-<div class="card">
-    <div class="card-title">Laatste 20 netbelastingsmetingen</div>
-    <table>
-        <thead>
-            <tr>
-                <th>Datum &amp; Tijd</th>
-                <th>Sensor</th>
-                <th>Belasting (MW)</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for m in laatste_load_metingen %}
-            <tr>
-                <td>{{ m.tijdstip|date:"d-m-Y H:i:s" }}</td>
-                <td style="font-family: var(--mono); font-size:12px; color: var(--muted);">
-                    {{ m.sensor_id }}
-                </td>
-                <td>{{ m.waarde|floatformat:2 }}</td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
-
 {% endblock %}
