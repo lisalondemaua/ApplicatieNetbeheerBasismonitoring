@@ -11,4 +11,6 @@ urlpatterns = [
     path('importeer-sensoren/', views.importeer_sensors_api_view, name='importeer_sensoren'),
     path('rapporten/', views.RapportListView.as_view(), name='rapport_lijst'),
     path('rapport/<str:rapport_id>/', views.RapportDetailView.as_view(), name='rapport_detail'),
+    path('genereer-rapporten/', views.genereer_rapporten_view, name='genereer_rapporten'),
 ]
+

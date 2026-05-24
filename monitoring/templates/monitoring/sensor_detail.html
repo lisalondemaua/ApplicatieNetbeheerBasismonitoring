@@ -36,7 +36,13 @@
             <tr>
                 <td>{{ m.tijdstip|date:"d-m-Y H:i:s" }}</td>
                 <td>{{ m.parameter_naam }}</td>
-                <td>{{ m.waarde|floatformat:4 }}</td>
+                <td>
+                    {% if m.freq_danger %}
+                        <span class="freq-danger">{{ m.waarde|floatformat:4 }}</span>
+                    {% else %}
+                        <span>{{ m.waarde|floatformat:4 }}</span>
+                    {% endif %}
+                </td>
                 <td>{{ m.eenheid|default:"-" }}</td>
             </tr>
         {% endfor %}

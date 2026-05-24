@@ -4,6 +4,11 @@
 
 {% block content %}
 <div class="page-header">
+<div class="mb-4" style="margin-bottom: 1.5rem;">
+    <a href="{% url 'monitoring:importeer_sensoren' %}" class="btn btn-primary" style="background-color: var(--accent); color: white; padding: 0.6rem 1.2rem; text-decoration: none; border-radius: 4px; font-weight: 600;">
+        Data Importeren via Elia API
+    </a>
+</div>
     <h1>Dashboard</h1>
     <p>Overzicht van de laatste frequentiemetingen, infeed en terugleveringen</p>
 </div>
@@ -34,7 +39,7 @@
             <tr>
                 <td>{{ m.tijdstip|date:"d-m-Y H:i:s" }}</td>
                 <td style="font-family: var(--mono); font-size:12px; color: var(--muted);">{{ m.sensor_id }}</td>
-                <td class="{% if m.in_spec %}freq-ok{% else %}freq-danger{% endif %}">
+                <td class="{% if m.parameter.naam == "frequentie" and not m.in_spec %}freq-danger{% else %}{% endif %}">
                     {{ m.waarde|floatformat:4 }}
                 </td>
                 <td>
@@ -151,7 +156,7 @@
                 <td style="font-size:12px;">{{ r.location }}</td>
                 <td style="font-size:12px;">{{ r.region }}</td>
                 <td style="font-size:12px;">{{ r.dso }}</td>
-                <td style="font-size:12px;">{{ r.voltagelevel }} kV</td>
+                <td style="font-size:12px;">{{ r.voltage_level }} kV</td>
                 <td class="{% if r.is_teruglevering %}freq-danger{% else %}freq-ok{% endif %}">
                     {{ r.waarde|floatformat:3 }}
                 </td>

@@ -14,15 +14,7 @@ from django.utils import timezone
 
 from model_bakery import baker
 
-from monitoring.models import (
-    Net,
-    Infrastructuur,
-    Sensor,
-    Meetparameter,
-    Meting,
-    Operator,
-    Rapport,
-)
+from monitoring.models import Net, Infrastructuur, Sensor, Meetparameter, Meting, Rapport
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. GLOBALE VARIABELEN
@@ -30,30 +22,16 @@ from monitoring.models import (
 AMOUNT_GENERATED_DATA = 20
 AMOUNT_INFEED_DATA = 500
 
-# Kies uurlijkse data voor 7 dagen (minder punten, sneller, toch mooie grafiek)
 AANTAL_METINGEN_PER_SENSOR = 7 * 24   # 168 metingen per sensor
 INTERVAL_MINUTEN = 60                 # 1 meting per uur
 
-# Beperk aantal infeed-stations zodat tests/DB niet te zwaar worden
-MAX_INFEED_STATIONS = 30
+MAX_INFEED_STATIONS = 50
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. REALISTISCHE INFEED GENERATIE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_realistic_infeed(voltage_kv, hour):
-    """
-    Genereert realistische MW-infeed op basis van:
-    - spanningsniveau
-    - tijdstip van de dag
-    - willekeurige variatie
-
-    Conventie (zoals je UI eerder gebruikte):
-    - negatief = teruglevering/injectie
-    - positief = afname/consumptie
-    """
-
-    # Dagcurve (nacht lager, overdag hoger) — blijft altijd positief (0.2..1.0)
     daily_factor = 0.6 + 0.4 * math.sin((hour - 6) / 24 * 2 * math.pi)
 
     # ── Laagspanning ────────────────────────────────────────────────────────
@@ -225,10 +203,9 @@ class GenereerData(TransactionTestCase):
 
         # ── Bestaande data verwijderen ───────────────────────────────────────
         Meting.objects.all().delete()
-        Operator.objects.all().delete()
         Rapport.objects.all().delete()
 
-        print("Metingen/rapporten/operators verwijderd.")
+        print("Metingen/rapporten verwijderd.")
         print("Sensoren blijven behouden.")
 
         print("\nData generatie gestart...\n")
@@ -260,7 +237,6 @@ class GenereerData(TransactionTestCase):
             type="Frequentie (landelijk)",
             net=net_freq,
             infrastructuur=infra_freq,
-            communicatie_protocol="N.v.t.",
             status="actief",
         )
 
@@ -268,8 +244,6 @@ class GenereerData(TransactionTestCase):
             naam="frequentie",
             defaults={
                 "eenheid": "Hz",
-                "drempel_onder": 49.5,
-                "drempel_boven": 50.5,
             },
         )
 
@@ -300,7 +274,6 @@ class GenereerData(TransactionTestCase):
             type="Netbelasting (nationaal)",
             net=net_load,
             infrastructuur=infra_load,
-            communicatie_protocol="N.v.t.",
             status="actief",
         )
 
@@ -308,8 +281,6 @@ class GenereerData(TransactionTestCase):
             naam="totalload",
             defaults={
                 "eenheid": "MW",
-                "drempel_onder": 0.0,
-                "drempel_boven": 15000.0,
             },
         )
 
@@ -321,8 +292,6 @@ class GenereerData(TransactionTestCase):
             naam="infeedvalue",
             defaults={
                 "eenheid": "MW",
-                "drempel_onder": -5000.0,
-                "drempel_boven": 10000.0,
             },
         )
 
@@ -347,7 +316,6 @@ class GenereerData(TransactionTestCase):
                 parameter=param_freq,
                 tijdstip=tijdstip,
                 waarde=float(item["waarde"]),
-                kwaliteit="in_spec",
             )
 
         # ─────────────────────────────────────────────────────────────────────
@@ -373,11 +341,6 @@ class GenereerData(TransactionTestCase):
                 parameter=param_load,
                 tijdstip=tijdstip,
                 waarde=waarde,
-                kwaliteit=(
-                    "in_spec"
-                    if waarde < 15000
-                    else "waarschuwing"
-                ),
             )
 
         # ─────────────────────────────────────────────────────────────────────
@@ -448,11 +411,9 @@ class GenereerData(TransactionTestCase):
                     "type": "Infeed-sensor",
                     "net": net_infeed,
                     "infrastructuur": infra_infeed,
-                    "communicatie_protocol": "N.v.t.",
                     "status": "actief",
                     "station": r.get("station"),
                     "location": r.get("location"),
-                    "region": r.get("region"),
                 },
             )
 
@@ -462,7 +423,6 @@ class GenereerData(TransactionTestCase):
 
             tijden = []
             waarden = []
-            kwaliteiten = []
 
             for i in range(AANTAL_METINGEN_PER_SENSOR):
 
@@ -479,13 +439,6 @@ class GenereerData(TransactionTestCase):
                 tijden.append(timestamp)
                 waarden.append(waarde)
 
-                # kwaliteitslabel
-                if abs(waarde) > 5000:
-                    kwaliteiten.append("kritiek")
-                elif abs(waarde) > 1000:
-                    kwaliteiten.append("waarschuwing")
-                else:
-                    kwaliteiten.append("in_spec")
 
             baker.make_recipe(
                 "monitoring.meting",
@@ -494,35 +447,12 @@ class GenereerData(TransactionTestCase):
                 parameter=param_infeed,
                 tijdstip=tijden,
                 waarde=waarden,
-                kwaliteit=kwaliteiten,
             )
 
             print(
                 f"Sensor {sensor_infeed.sensor_id} "
                 f"({voltage_float} kV) "
                 f"=> {len(waarden)} metingen"
-            )
-
-        # ─────────────────────────────────────────────────────────────────────
-        # OVERIGE DATA
-        # ─────────────────────────────────────────────────────────────────────
-
-        print("\nOperators en rapporten genereren...\n")
-
-        for i in range(AMOUNT_GENERATED_DATA):
-
-            operator = baker.make_recipe(
-                "monitoring.operator"
-            )
-
-            baker.make_recipe(
-                "monitoring.rapport",
-                operator=operator
-            )
-
-            print(
-                f"Operator/Rapport "
-                f"{i + 1}/{AMOUNT_GENERATED_DATA}"
             )
 
         # ─────────────────────────────────────────────────────────────────────

@@ -5,8 +5,6 @@ class Net(models.Model):
     net_id = models.CharField(max_length=50, unique=True) # unique=True zodat er geen dubbele netten kunnen worden aangemaakt
     type = models.CharField(max_length=50)
     spanningsniveau = models.FloatField()
-    freq_min = models.FloatField(default=49.5)
-    freq_max = models.FloatField(default=50.5)
 
 # Bepaalt hoe het object wordt weergegeven in de admin interface en andere contexten --> Bijvoorbeeld 'Net 1 (Hoogspanningsnet)'
     def __str__(self):
@@ -40,13 +38,14 @@ class Sensor(models.Model):
     # on_delete=models.CASCADE zorgt ervoor dat als een net wordt verwijderd, de bijbehorende sensoren ook worden verwijderd
     # related_name="sensoren" maakt het mogelijk om via een net object alle bijbehorende sensoren op te halen
     infrastructuur = models.ForeignKey(Infrastructuur, on_delete=models.CASCADE, related_name="sensoren", blank=True, null=True)
-    communicatie_protocol = models.CharField(max_length=32, default='NB-IoT')
     status = models.CharField(max_length=32, default='actief')
 
     # Nieuwe velden uit de Elia API - bevatten stationsmetadata
     station = models.CharField(max_length=100, blank=True, default='')
     location = models.CharField(max_length=200, blank=True, default='')
-    region = models.CharField(max_length=50, blank=True, default='')
+
+    laatste_waarde = models.FloatField(blank=True, null=True)
+    laatste_tijdstip = models.DateTimeField(blank=True, null=True)
 
     def __str__(self):
         return f"Sensor {self.sensor_id} ({self.type})"
@@ -57,8 +56,6 @@ class Sensor(models.Model):
 class Meetparameter(models.Model):
     naam = models.CharField(max_length=32, unique=True)
     eenheid = models.CharField(max_length=10)
-    drempel_onder = models.FloatField()
-    drempel_boven = models.FloatField()
 
     def __str__(self):
         return f"{self.naam} ({self.eenheid})"
@@ -68,35 +65,17 @@ class Meetparameter(models.Model):
 
 
 class Meting(models.Model):
-    meting_id = models.AutoField(primary_key=True) # AutoField zorgt ervoor dat dit veld automatisch een unieke waarde krijgt bij het aanmaken van een nieuwe meting, primary_key=True maakt dit veld de primaire sleutel van het model
     tijdstip = models.DateTimeField(default=timezone.now, db_index=True)
     waarde = models.FloatField()
-    kwaliteit = models.CharField(max_length=20, default='in_spec')
-    sensor = models.ForeignKey(Sensor, on_delete=models.CASCADE, related_name="metingen", default=0)
-    parameter = models.ForeignKey(Meetparameter, on_delete=models.CASCADE, related_name="metingen", default="")
+    sensor = models.ForeignKey(Sensor, on_delete=models.CASCADE, related_name="metingen")
+    parameter = models.ForeignKey(Meetparameter, on_delete=models.CASCADE, related_name="metingen")
 
     def __str__(self):
-        return f"Meting {self.meting_id}: {self.waarde} @ {self.tijdstip}"
+        return f"Meting {self.id}: {self.waarde} @ {self.tijdstip}"
 
     class Meta:
         verbose_name_plural = "Metingen"
         ordering = ["-tijdstip"]
-
-
-class Operator(models.Model):
-    medewerker_id = models.CharField(max_length=50, unique=True)
-    naam = models.CharField(max_length=100)
-    rol = models.CharField(max_length=50, choices=[("beheerder", "Beheerder"),("technicus", "Technicus"),("monitor", "Monitor"),] )
-    emailadres = models.EmailField()
-    telefoonnummer = models.CharField(max_length=20, blank=True)
-    actief = models.BooleanField(default=True)
-
-    def __str__(self):
-        return f"{self.naam} ({self.rol})"
-
-    class Meta:
-        verbose_name = "operator"
-        verbose_name_plural = "operators"
 
 
 class Rapport(models.Model):
@@ -106,7 +85,7 @@ class Rapport(models.Model):
     periode_start = models.DateTimeField()
     periode_einde = models.DateTimeField()
     inhoud = models.TextField()
-    operator = models.ForeignKey(Operator, on_delete=models.SET_NULL, null=True, blank=True)
+
 
     def __str__(self):
         return f"{self.titel} ({self.rapport_id})"
@@ -114,5 +93,3 @@ class Rapport(models.Model):
     class Meta:
         verbose_name = "rapport"
         verbose_name_plural = "rapporten"
-
-
