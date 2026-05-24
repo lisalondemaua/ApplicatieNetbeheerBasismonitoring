@@ -13,6 +13,57 @@
     {% if net %}&nbsp;|&nbsp; Net: <strong>{{ net.net_id }}</strong> ({{ net.type }}){% endif %}
 </div>
 
+    {# ------------------------------------------------------------------ #}
+{# FREQUENTIEMETINGEN                                                #}
+{# ------------------------------------------------------------------ #}
+<div class="card">
+    <div class="card-title">Laatste 20 frequentiemetingen</div>
+
+    {% if laatste_metingen %}
+    <table>
+        <thead>
+            <tr>
+                <th>Datum &amp; Tijd</th>
+                <th>Sensor</th>
+                <th>Frequentie (Hz)</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for m in laatste_metingen %}
+            <tr>
+                <td>{{ m.tijdstip|date:"d-m-Y H:i:s" }}</td>
+                <td style="font-family: var(--mono); font-size:12px; color: var(--muted);">{{ m.sensor_id }}</td>
+                <td class="{% if m.in_spec %}freq-ok{% else %}freq-danger{% endif %}">
+                    {{ m.waarde|floatformat:4 }}
+                </td>
+                <td>
+                    {% if m.in_spec %}
+                        <span class="badge badge-ok">OK</span>
+                    {% else %}
+                        <span class="badge badge-danger">Afwijking</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">Geen metingen gevonden.</div>
+    {% endif %}
+
+{# ------------------------------------------------------------------ #}
+{# BOKEH FREQUENTIEGRAFIEK                                           #}
+{# ------------------------------------------------------------------ #}
+{% if bokeh_div %}
+<div class="card">
+    <div class="card-title">Frequentieverloop over tijd</div>
+    {{ bokeh_script|safe }}
+    {{ bokeh_div|safe }}
+</div>
+{% endif %}
+
+
 {# ------------------------------------------------------------------ #}
 {# INFEED SAMENVATTING                                               #}
 {# ------------------------------------------------------------------ #}
@@ -118,54 +169,5 @@
 </div>
 {% endif %}
 
-{# ------------------------------------------------------------------ #}
-{# BOKEH FREQUENTIEGRAFIEK                                           #}
-{# ------------------------------------------------------------------ #}
-{% if bokeh_div %}
-<div class="card">
-    <div class="card-title">Frequentieverloop over tijd</div>
-    {{ bokeh_script|safe }}
-    {{ bokeh_div|safe }}
-</div>
-{% endif %}
 
-{# ------------------------------------------------------------------ #}
-{# FREQUENTIEMETINGEN                                                #}
-{# ------------------------------------------------------------------ #}
-<div class="card">
-    <div class="card-title">Laatste 20 frequentiemetingen</div>
-
-    {% if laatste_metingen %}
-    <table>
-        <thead>
-            <tr>
-                <th>Datum &amp; Tijd</th>
-                <th>Sensor</th>
-                <th>Frequentie (Hz)</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for m in laatste_metingen %}
-            <tr>
-                <td>{{ m.tijdstip|date:"d-m-Y H:i:s" }}</td>
-                <td style="font-family: var(--mono); font-size:12px; color: var(--muted);">{{ m.sensor_id }}</td>
-                <td class="{% if m.in_spec %}freq-ok{% else %}freq-danger{% endif %}">
-                    {{ m.waarde|floatformat:4 }}
-                </td>
-                <td>
-                    {% if m.in_spec %}
-                        <span class="badge badge-ok">OK</span>
-                    {% else %}
-                        <span class="badge badge-danger">Afwijking</span>
-                    {% endif %}
-                </td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">Geen metingen gevonden.</div>
-    {% endif %}
-</div>
 {% endblock %}

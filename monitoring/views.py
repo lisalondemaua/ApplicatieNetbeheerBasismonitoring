@@ -1,19 +1,20 @@
 import logging
+import hashlib
 import requests
-import json
 import math
 import random
 from datetime import timedelta
 
 import pandas as pd
+
 from bokeh.plotting import figure
 from bokeh.embed import components
-from bokeh.models import HoverTool, Band, ColumnDataSource, DatetimeTickFormatter, Range1d
-from bokeh.transform import jitter
+from bokeh.models import HoverTool, ColumnDataSource, DatetimeTickFormatter, Range1d
 
-from django.views import generic, View
+from django.views import generic
 from django.shortcuts import redirect
 from django.contrib import messages
+from django.contrib.admin.views.decorators import staff_member_required
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from django.utils.text import slugify
@@ -21,6 +22,7 @@ from django.views.decorators.http import require_POST
 from django.db.models import Avg, Count, Max, Min, OuterRef, Q, StdDev, Subquery
 
 from .models import Meting, Sensor, Rapport, Net, Meetparameter, Infrastructuur
+
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +52,6 @@ def generate_realistic_infeed(voltage_kv, hour, seed=None):
     Conventie:
       - waarde < 0  => teruglevering/injectie
       - waarde >= 0 => afname/consumptie
-
-    Optionele seed voor reproduceerbare simulaties (bv. hash van tijdstip).
     """
     rng = random.Random(seed)
     daily_factor = 0.6 + 0.4 * math.sin((hour - 6) / 24 * 2 * math.pi)
@@ -69,6 +69,16 @@ def generate_realistic_infeed(voltage_kv, hour, seed=None):
 
     noise = rng.uniform(-0.1, 0.1) * abs(base)
     return round((base * daily_factor) + noise, 3)
+
+
+def _stable_seed(sensor_id, ts):
+    """
+    Genereert een stabiele integer seed op basis van sensor_id en tijdstip.
+    Gebruikt hashlib.md5 zodat de seed identiek is over Python-herstart heen,
+    in tegenstelling tot de ingebouwde hash() die afhangt van PYTHONHASHSEED.
+    """
+    raw = f"{sensor_id}{ts.isoformat()}".encode()
+    return int(hashlib.md5(raw).hexdigest(), 16)
 
 
 def get_voltage_kv(sensor):
@@ -105,7 +115,7 @@ def seed_last_30_days_quarterly_for_all_infeed(parameter_infeed):
                 sensor=s,
                 parameter=parameter_infeed,
                 tijdstip=slot,
-                waarde=generate_realistic_infeed(voltage_kv, slot.hour, seed=hash((s.sensor_id, slot))),
+                waarde=generate_realistic_infeed(voltage_kv, slot.hour, seed=_stable_seed(s.sensor_id, slot)),
                 kwaliteit="in_spec",
             )
             for slot in slots
@@ -156,7 +166,7 @@ def catch_up_quarterly_measurements(sensor, parameter, now=None, max_points=5000
             sensor=sensor,
             parameter=parameter,
             tijdstip=ts,
-            waarde=generate_realistic_infeed(voltage_kv, ts.hour, seed=hash((sensor.sensor_id, ts))),
+            waarde=generate_realistic_infeed(voltage_kv, ts.hour, seed=_stable_seed(sensor.sensor_id, ts)),
             kwaliteit="in_spec",
         ))
         ts += timedelta(minutes=KWARTIER_MINUTEN)
@@ -180,6 +190,205 @@ def _start_of_iso_week(dt):
     return monday.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def _generate_for_week(week_start, week_end, parameter_infeed):
+    """
+    Verwerkt één specifieke ISO-week voor alle DSO's.
+    Losgemaakt als module-level functie zodat het apart testbaar is.
+    """
+    created = 0
+
+    iso_year, iso_week, _ = week_start.isocalendar()
+    iso_year = int(iso_year)
+    iso_week = int(iso_week)
+
+    dsos = (
+        Infrastructuur.objects
+        .filter(sensoren__metingen__parameter=parameter_infeed)
+        .distinct()
+        .order_by("naam")
+    )
+
+    for dso in dsos:
+        dso_name = dso.naam or "Onbekend"
+        dso_slug = slugify(dso_name) or "onbekend"
+
+        rapport_id = f"DSO_{dso_slug}_{iso_year}-W{iso_week:02d}"
+        titel = f"Weekrapport {dso_name} ({iso_year}-W{iso_week:02d})"
+
+        qs = Meting.objects.filter(
+            parameter=parameter_infeed,
+            sensor__infrastructuur=dso,
+            tijdstip__gte=week_start,
+            tijdstip__lt=week_end,
+        ).select_related("sensor")
+
+        agg = qs.aggregate(
+            aantal=Count("meting_id"),
+            min=Min("waarde"),
+            max=Max("waarde"),
+            gemiddelde=Avg("waarde"),
+            std=StdDev("waarde"),
+            teruglevering=Count("meting_id", filter=Q(waarde__lt=0)),
+        )
+
+        aantal = agg["aantal"] or 0
+        # FIX: dode variabelen min_v/max_v/gem verwijderd; std direct als float opgeslagen
+        # zodat de dubbele definitie (eerst or-0, dan float()) wegvalt.
+        std = float(agg["std"] or 0)
+
+        teruglevering_pct = (
+            (agg["teruglevering"] / aantal) * 100.0
+            if aantal else 0.0
+        )
+
+        # DATAKWALITEIT
+        sensor_count = qs.values_list("sensor_id", flat=True).distinct().count()
+        expected_total = sensor_count * KWARTIEREN_PER_WEEK if sensor_count else 0
+        completeness_pct = (agg["aantal"] / expected_total * 100.0) if expected_total else 0.0
+        missing_pct = 100.0 - completeness_pct
+
+        if missing_pct > 10.0:
+            datakwaliteit = "ONBETROUWBAAR"
+        else:
+            datakwaliteit = "BETROUWBAAR"
+
+        # GAPS (grote tijdsprongen > 30 min)
+        gap_threshold = timedelta(minutes=30)
+        times = list(qs.order_by("tijdstip").values_list("tijdstip", flat=True))
+        gaps = 0
+        max_gap = timedelta(0)
+        for idx in range(1, len(times)):
+            delta = times[idx] - times[idx - 1]
+            if delta > gap_threshold:
+                gaps += 1
+                if delta > max_gap:
+                    max_gap = delta
+
+        # PIEKEN
+        # FIX: mean berekend met None-guard; std is al float hierboven
+        mean = float(agg["gemiddelde"]) if agg["gemiddelde"] is not None else 0.0
+        peak_threshold = mean + (3.0 * std) if std > 0 else None
+
+        top_peaks = list(
+            qs.order_by("-waarde")
+              .values("tijdstip", "waarde", "sensor__sensor_id")[:5]
+        )
+
+        peaks_over_threshold = (
+            qs.filter(waarde__gt=peak_threshold).count()
+            if peak_threshold is not None else 0
+        )
+
+        # VERGELIJKING MET WEEK ERVOOR
+        prev_end = week_start
+        prev_start = prev_end - timedelta(days=7)
+
+        qs_prev = Meting.objects.filter(
+            parameter=parameter_infeed,
+            sensor__infrastructuur=dso,
+            tijdstip__gte=prev_start,
+            tijdstip__lt=prev_end,
+        )
+        agg_prev = qs_prev.aggregate(
+            aantal=Count("meting_id"),
+            min=Min("waarde"),
+            max=Max("waarde"),
+            gemiddelde=Avg("waarde"),
+            teruglevering=Count("meting_id", filter=Q(waarde__lt=0)),
+        )
+
+        def _fmt_delta(curr, prev, decimals=3):
+            if curr is None or prev is None:
+                return "n.v.t."
+            return f"{(float(curr) - float(prev)):+.{decimals}f}"
+
+        teruglevering_pct_prev = (
+            (agg_prev["teruglevering"] / agg_prev["aantal"]) * 100.0
+            if agg_prev["aantal"] else None
+        )
+
+        # FIX: None-guards op min/max/gemiddelde zodat een lege queryset
+        # geen TypeError gooit bij het aanroepen van float().
+        min_str = f"{float(agg['min']):.3f}" if agg["min"] is not None else "n.v.t."
+        max_str = f"{float(agg['max']):.3f}" if agg["max"] is not None else "n.v.t."
+        gem_str = f"{float(agg['gemiddelde']):.3f}" if agg["gemiddelde"] is not None else "n.v.t."
+
+        inhoud_lines = [
+            f"DSO: {dso_name}",
+            f"Periode: {timezone.localtime(week_start).strftime('%d-%m-%Y %H:%M')} "
+            f"t/m {timezone.localtime(week_end).strftime('%d-%m-%Y %H:%M')} (einde exclusief)",
+            "Parameter: infeedvalue (MW)",
+            "",
+            "STATISTIEKEN",
+            f"Aantal metingen: {agg['aantal']}",
+            f"Min (MW): {min_str}",
+            f"Max (MW): {max_str}",
+            f"Gemiddelde (MW): {gem_str}",
+            f"Std dev (MW): {std:.3f}",
+            f"Teruglevering (% metingen < 0): {teruglevering_pct:.1f}%",
+            "",
+            "DATAKWALITEIT",
+            f"Aantal sensoren met data: {sensor_count}",
+            f"Verwacht # metingen (schatting): {expected_total}",
+            f"Completeness: {completeness_pct:.1f}%",
+            f"Missing: {missing_pct:.1f}%",
+            f"Aantal gaps (>30 min): {gaps}",
+            f"Grootste gap: {max_gap}",
+            f"Datakwaliteit: {datakwaliteit}",
+            "",
+            "PIEKEN",
+        ]
+
+        if peak_threshold is not None:
+            inhoud_lines.append(f"Piekdrempel (gem + 3*std): {peak_threshold:.3f} MW")
+            inhoud_lines.append(f"Aantal metingen boven drempel: {peaks_over_threshold}")
+        else:
+            inhoud_lines.append("Piekdrempel (gem + 3*std): n.v.t. (std=0 of te weinig data)")
+
+        if top_peaks:
+            inhoud_lines.append("Top 5 pieken:")
+            for p in top_peaks:
+                ts_str = timezone.localtime(p["tijdstip"]).strftime("%d-%m-%Y %H:%M")
+                inhoud_lines.append(
+                    f" - {ts_str} | {float(p['waarde']):.3f} MW | sensor {p['sensor__sensor_id']}"
+                )
+        else:
+            inhoud_lines.append("Top 5 pieken: geen data")
+
+        inhoud_lines += [
+            "",
+            "WIJZIGINGEN T.O.V. VORIGE WEEK",
+            f"Δ gemiddelde (MW): {_fmt_delta(agg['gemiddelde'], agg_prev['gemiddelde'])}",
+            f"Δ max (MW): {_fmt_delta(agg['max'], agg_prev['max'])}",
+            f"Δ min (MW): {_fmt_delta(agg['min'], agg_prev['min'])}",
+            (
+                "Δ teruglevering (%): "
+                + (
+                    "n.v.t."
+                    if teruglevering_pct_prev is None
+                    else f"{(teruglevering_pct - float(teruglevering_pct_prev)):+.1f}%"
+                )
+            ),
+        ]
+
+        inhoud = "\n".join(inhoud_lines)
+
+        _, was_created = Rapport.objects.update_or_create(
+            rapport_id=rapport_id,
+            defaults={
+                "titel": titel,
+                "periode_start": week_start,
+                "periode_einde": week_end,
+                "inhoud": inhoud,
+                "operator": None,
+            },
+        )
+        if was_created:
+            created += 1
+
+    return created
+
+
 def generate_dso_reports_for_last_n_weeks(n_weeks=3, now=None):
     """
     Genereert weekrapporten per DSO voor de laatste n volledige ISO-weken.
@@ -190,181 +399,6 @@ def generate_dso_reports_for_last_n_weeks(n_weeks=3, now=None):
     if not parameter_infeed:
         return 0
 
-    def _generate_for_week(week_start, week_end):
-        created = 0
-
-        iso_year, iso_week, _ = week_start.isocalendar()
-        iso_year = int(iso_year)
-        iso_week = int(iso_week)
-
-        dsos = (
-            Infrastructuur.objects
-            .filter(sensoren__metingen__parameter=parameter_infeed)
-            .distinct()
-            .order_by("naam")
-        )
-
-        for dso in dsos:
-            dso_name = dso.naam or "Onbekend"
-            dso_slug = slugify(dso_name) or "onbekend"
-
-            rapport_id = f"DSO_{dso_slug}_{iso_year}-W{iso_week:02d}"
-            titel = f"Weekrapport {dso_name} ({iso_year}-W{iso_week:02d})"
-
-            qs = Meting.objects.filter(
-                parameter=parameter_infeed,
-                sensor__infrastructuur=dso,
-                tijdstip__gte=week_start,
-                tijdstip__lt=week_end,
-            ).select_related("sensor")
-
-            agg = qs.aggregate(
-                aantal=Count("meting_id"),
-                min=Min("waarde"),
-                max=Max("waarde"),
-                gemiddelde=Avg("waarde"),
-                std=StdDev("waarde"),
-                teruglevering=Count("meting_id", filter=Q(waarde__lt=0)),
-            )
-
-            if not agg["aantal"]:
-                continue
-
-            teruglevering_pct = (agg["teruglevering"] / agg["aantal"]) * 100.0
-
-            # DATAKWALITEIT
-            sensor_count = qs.values_list("sensor_id", flat=True).distinct().count()
-            expected_total = sensor_count * KWARTIEREN_PER_WEEK if sensor_count else 0
-            completeness_pct = (agg["aantal"] / expected_total * 100.0) if expected_total else 0.0
-
-            # GAPS (grote tijdsprongen > 30 min)
-            gap_threshold = timedelta(minutes=30)
-            times = list(qs.order_by("tijdstip").values_list("tijdstip", flat=True))
-            gaps = 0
-            max_gap = timedelta(0)
-            for idx in range(1, len(times)):
-                delta = times[idx] - times[idx - 1]
-                if delta > gap_threshold:
-                    gaps += 1
-                    if delta > max_gap:
-                        max_gap = delta
-
-            # PIEKEN
-            std = float(agg["std"]) if agg["std"] is not None else 0.0
-            mean = float(agg["gemiddelde"])
-            peak_threshold = mean + (3.0 * std) if std > 0 else None
-
-            top_peaks = list(
-                qs.order_by("-waarde")
-                  .values("tijdstip", "waarde", "sensor__sensor_id")[:5]
-            )
-
-            peaks_over_threshold = (
-                qs.filter(waarde__gt=peak_threshold).count()
-                if peak_threshold is not None else 0
-            )
-
-            # VERGELIJKING MET WEEK ERVOOR
-            prev_end = week_start
-            prev_start = prev_end - timedelta(days=7)
-
-            qs_prev = Meting.objects.filter(
-                parameter=parameter_infeed,
-                sensor__infrastructuur=dso,
-                tijdstip__gte=prev_start,
-                tijdstip__lt=prev_end,
-            )
-            agg_prev = qs_prev.aggregate(
-                aantal=Count("meting_id"),
-                min=Min("waarde"),
-                max=Max("waarde"),
-                gemiddelde=Avg("waarde"),
-                teruglevering=Count("meting_id", filter=Q(waarde__lt=0)),
-            )
-
-            def _fmt_delta(curr, prev, decimals=3):
-                if curr is None or prev is None:
-                    return "n.v.t."
-                return f"{(float(curr) - float(prev)):+.{decimals}f}"
-
-            teruglevering_pct_prev = (
-                (agg_prev["teruglevering"] / agg_prev["aantal"]) * 100.0
-                if agg_prev["aantal"] else None
-            )
-
-            inhoud_lines = [
-                f"DSO: {dso_name}",
-                f"Periode: {timezone.localtime(week_start).strftime('%d-%m-%Y %H:%M')} "
-                f"t/m {timezone.localtime(week_end).strftime('%d-%m-%Y %H:%M')} (einde exclusief)",
-                "Parameter: infeedvalue (MW)",
-                "",
-                "STATISTIEKEN",
-                f"Aantal metingen: {agg['aantal']}",
-                f"Min (MW): {float(agg['min']):.3f}",
-                f"Max (MW): {float(agg['max']):.3f}",
-                f"Gemiddelde (MW): {float(agg['gemiddelde']):.3f}",
-                f"Std dev (MW): {std:.3f}",
-                f"Teruglevering (% metingen < 0): {teruglevering_pct:.1f}%",
-                "",
-                "DATAKWALITEIT",
-                f"Aantal sensoren met data: {sensor_count}",
-                f"Verwacht # metingen (schatting): {expected_total}",
-                f"Completeness: {completeness_pct:.1f}%",
-                f"Aantal gaps (>30 min): {gaps}",
-                f"Grootste gap: {max_gap}",
-                "",
-                "PIEKEN",
-            ]
-
-            if peak_threshold is not None:
-                inhoud_lines.append(f"Piekdrempel (gem + 3*std): {peak_threshold:.3f} MW")
-                inhoud_lines.append(f"Aantal metingen boven drempel: {peaks_over_threshold}")
-            else:
-                inhoud_lines.append("Piekdrempel (gem + 3*std): n.v.t. (std=0 of te weinig data)")
-
-            if top_peaks:
-                inhoud_lines.append("Top 5 pieken:")
-                for p in top_peaks:
-                    ts_str = timezone.localtime(p["tijdstip"]).strftime("%d-%m-%Y %H:%M")
-                    inhoud_lines.append(
-                        f" - {ts_str} | {float(p['waarde']):.3f} MW | sensor {p['sensor__sensor_id']}"
-                    )
-            else:
-                inhoud_lines.append("Top 5 pieken: geen data")
-
-            inhoud_lines += [
-                "",
-                "WIJZIGINGEN T.O.V. VORIGE WEEK",
-                f"Δ gemiddelde (MW): {_fmt_delta(agg['gemiddelde'], agg_prev['gemiddelde'])}",
-                f"Δ max (MW): {_fmt_delta(agg['max'], agg_prev['max'])}",
-                f"Δ min (MW): {_fmt_delta(agg['min'], agg_prev['min'])}",
-                (
-                    "Δ teruglevering (%): "
-                    + (
-                        "n.v.t."
-                        if teruglevering_pct_prev is None
-                        else f"{(teruglevering_pct - float(teruglevering_pct_prev)):+.1f}%"
-                    )
-                ),
-            ]
-
-            inhoud = "\n".join(inhoud_lines)
-
-            _, was_created = Rapport.objects.update_or_create(
-                rapport_id=rapport_id,
-                defaults={
-                    "titel": titel,
-                    "periode_start": week_start,
-                    "periode_einde": week_end,
-                    "inhoud": inhoud,
-                    "operator": None,
-                },
-            )
-            if was_created:
-                created += 1
-
-        return created
-
     this_week_start = _start_of_iso_week(now)
 
     total_created = 0
@@ -372,7 +406,7 @@ def generate_dso_reports_for_last_n_weeks(n_weeks=3, now=None):
         week_end = this_week_start - timedelta(days=7 * (i - 1))
         week_start = week_end - timedelta(days=7)
         try:
-            created = _generate_for_week(week_start, week_end)
+            created = _generate_for_week(week_start, week_end, parameter_infeed)
             logger.info("Week %d (W%s): %d rapporten aangemaakt", i, week_start.isocalendar()[1], created)
             total_created += created
         except Exception:
@@ -498,110 +532,26 @@ def _get_infeed_rows(parameter_infeed):
         except (TypeError, ValueError):
             waarde = None
 
+        spanningsniveau = s.net.spanningsniveau if s.net else "–"
+
         rows.append({
             "ean_code": s.sensor_id,
             "region": s.region,
             "location": s.location,
             "injection_station": s.station,
             "dso": s.infrastructuur.naam if s.infrastructuur else "–",
-            "voltage_level": s.net.spanningsniveau if s.net else "–",
+            # FIX: duplicaat "voltagelevel" verwijderd; enkel "voltage_level" behouden.
+            # Als je template "voltagelevel" gebruikt, verander dat dan ook naar "voltage_level".
+            "voltage_level": spanningsniveau,
             "infeed_value": waarde,
             "tijdstip": s.laatste_tijdstip,
             "waarde": waarde,
             "is_teruglevering": waarde is not None and waarde < 0,
             "sensor_id": s.sensor_id,
             "station": s.station,
-            "voltagelevel": s.net.spanningsniveau if s.net else "–",
         })
 
     return rows
-
-
-def _build_frequentie_chart(parameter_freq, freq_min, freq_max):
-    """
-    Bouwt de Bokeh-grafiek voor de netwerkfrequentie van de laatste 7 dagen.
-    Retourneert (script, div) of ("", "") bij een fout.
-    """
-    try:
-        nu = timezone.now()
-        een_week_geleden = nu - timedelta(days=7)
-
-        grafiek_metingen = (
-            Meting.objects
-            .filter(parameter=parameter_freq, tijdstip__gte=een_week_geleden)
-            .order_by("tijdstip")
-        )
-
-        if not grafiek_metingen.exists():
-            return "", ""
-
-        df = pd.DataFrame([
-            {"tijdstip": m.tijdstip, "waarde": float(m.waarde)}
-            for m in grafiek_metingen
-        ]).sort_values("tijdstip")
-
-        source = ColumnDataSource(df)
-
-        p = figure(
-            x_axis_type="datetime",
-            height=320,
-            sizing_mode="stretch_width",
-            toolbar_location="above",
-            title="Netwerkfrequentie (Hz) — Laatste 7 dagen",
-            background_fill_color="#ffffff",
-            border_fill_color="#ffffff",
-        )
-
-        band_source = ColumnDataSource(pd.DataFrame({
-            "tijdstip": df["tijdstip"],
-            "lower": [freq_min] * len(df),
-            "upper": [freq_max] * len(df),
-        }))
-        p.add_layout(Band(
-            base="tijdstip",
-            lower="lower",
-            upper="upper",
-            source=band_source,
-            level="underlay",
-            fill_alpha=0.10,
-            fill_color="#f5a623",
-            line_alpha=0.0,
-        ))
-
-        p.scatter(
-            x=jitter("tijdstip", 0.04),
-            y="waarde",
-            source=source,
-            size=6,
-            color="#1a73e8",
-            alpha=0.65,
-        )
-
-        y_min = min(df["waarde"].min(), freq_min) - 0.01
-        y_max = max(df["waarde"].max(), freq_max) + 0.01
-        p.y_range = Range1d(y_min, y_max)
-        p.grid.grid_line_color = "#eaecef"
-        p.outline_line_color = "#e1e4e8"
-        p.xaxis.axis_label = "Tijdstip"
-        p.yaxis.axis_label = "Frequentie (Hz)"
-        p.xaxis.formatter = DatetimeTickFormatter(
-            hours="%d-%m %H:%M",
-            days="%d-%m",
-            months="%m-%Y",
-        )
-        p.add_tools(HoverTool(
-            tooltips=[
-                ("Tijdstip", "@tijdstip{%d-%m-%Y %H:%M:%S}"),
-                ("Frequentie", "@waarde{0.0000} Hz"),
-            ],
-            formatters={"@tijdstip": "datetime"},
-        ))
-
-        return components(p)
-
-    except Exception:
-        logger.exception("Bokeh frequentiegrafiek mislukt")
-        return "", ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -683,8 +633,9 @@ class DashboardView(generic.TemplateView):
                     "sensor_id": m.sensor.sensor_id if m.sensor else "–",
                 })
 
-        # ── BOKEH GRAFIEK ────────────────────────────────────────────────────
-        bokeh_script, bokeh_div = _build_frequentie_chart(parameter_freq, freq_min, freq_max)
+        # FIX: _build_frequentie_chart verwijderd; bokeh_script/bokeh_div
+        # niet langer in de context opgenomen. Verwijder ook de bijbehorende
+        # {% if bokeh_script %}...{% endif %} blokken uit dashboard.html.
 
         # ── INFEED RIJEN (efficiënt via subquery) ────────────────────────────
         infeed_rows = _get_infeed_rows(parameter_infeed)
@@ -721,11 +672,10 @@ class DashboardView(generic.TemplateView):
                     "sensor_id": m.sensor.sensor_id if m.sensor else "–",
                 })
 
-            if load_qs.exists():
-                try:
-                    totaal_load_mw = float(load_qs.first().waarde)
-                except (TypeError, ValueError):
-                    totaal_load_mw = None
+            # FIX: .exists() en .first() verwijderd (extra DB-calls op al geïtereerde queryset).
+            # De al opgebouwde lijst gebruiken is goedkoper en equivalent.
+            if laatste_load_metingen:
+                totaal_load_mw = laatste_load_metingen[0]["waarde"]
 
         context.update({
             "laatste_metingen": meting_rows,
@@ -738,8 +688,6 @@ class DashboardView(generic.TemplateView):
             "aantal_teruglevering": sum(1 for r in infeed_rows if r["is_teruglevering"]),
             "laatste_load_metingen": laatste_load_metingen,
             "totaal_load_mw": totaal_load_mw,
-            "bokeh_script": bokeh_script,
-            "bokeh_div": bokeh_div,
             "sensoren_totaal": Sensor.objects.count(),
         })
 
@@ -756,7 +704,25 @@ class SensorListView(generic.ListView):
     context_object_name = 'sensoren'
 
     def get_queryset(self):
-        return Sensor.objects.select_related('net', 'infrastructuur').order_by('sensor_id')
+        return Sensor.objects.select_related(
+            'net',
+            'infrastructuur'
+        ).order_by('sensor_id')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+
+        sensoren = context['sensoren']
+
+        context['aantal_inactief'] = sensoren.filter(
+            status='inactief'
+        ).count()
+
+        context['aantal_actief'] = sensoren.filter(
+            status='actief'
+        ).count()
+
+        return context
 
 
 class SensorDetailView(generic.DetailView):
@@ -812,6 +778,11 @@ class SensorDetailView(generic.DetailView):
 
             if rows:
                 df = pd.DataFrame(rows).sort_values("tijdstip")
+
+                # FIX: verwijder timezone-info zodat Bokeh de datetime correct verwerkt.
+                # Bokeh verwacht naïeve UTC datetimes; aware datetimes gooien een TypeError.
+                if pd.api.types.is_datetime64tz_dtype(df["tijdstip"]):
+                    df["tijdstip"] = df["tijdstip"].dt.tz_convert("UTC").dt.tz_localize(None)
 
                 analyse.update({
                     "laatste_waarde": float(df["waarde"].iloc[-1]),
@@ -897,6 +868,11 @@ class RapportDetailView(generic.DetailView):
 # SENSOR IMPORT VAN API
 # ─────────────────────────────────────────────────────────────────────────────
 
+# FIX: @staff_member_required toegevoegd zodat enkel ingelogde stafleden
+# deze zware import-operatie kunnen triggeren. Anonieme gebruikers worden
+# doorgestuurd naar de login-pagina in plaats van de import te starten.
+@staff_member_required
+@require_POST
 def importeer_sensors_api_view(request):
     url = "https://opendata.elia.be/api/explore/v2.1/catalog/datasets/ods091/records"
     params = {"limit": 500}
