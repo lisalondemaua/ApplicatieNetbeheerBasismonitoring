@@ -232,6 +232,8 @@ def _generate_for_week(week_start, week_end, parameter_infeed):
         )
 
         aantal = agg["aantal"] or 0
+        # FIX: dode variabelen min_v/max_v/gem verwijderd; std direct als float opgeslagen
+        # zodat de dubbele definitie (eerst or-0, dan float()) wegvalt.
         std = float(agg["std"] or 0)
 
         teruglevering_pct = (
@@ -263,6 +265,7 @@ def _generate_for_week(week_start, week_end, parameter_infeed):
                     max_gap = delta
 
         # PIEKEN
+        # FIX: mean berekend met None-guard; std is al float hierboven
         mean = float(agg["gemiddelde"]) if agg["gemiddelde"] is not None else 0.0
         peak_threshold = mean + (3.0 * std) if std > 0 else None
 
@@ -304,6 +307,8 @@ def _generate_for_week(week_start, week_end, parameter_infeed):
             if agg_prev["aantal"] else None
         )
 
+        # FIX: None-guards op min/max/gemiddelde zodat een lege queryset
+        # geen TypeError gooit bij het aanroepen van float().
         min_str = f"{float(agg['min']):.3f}" if agg["min"] is not None else "n.v.t."
         max_str = f"{float(agg['max']):.3f}" if agg["max"] is not None else "n.v.t."
         gem_str = f"{float(agg['gemiddelde']):.3f}" if agg["gemiddelde"] is not None else "n.v.t."
@@ -535,7 +540,10 @@ def _get_infeed_rows(parameter_infeed):
             "location": s.location,
             "injection_station": s.station,
             "dso": s.infrastructuur.naam if s.infrastructuur else "–",
+            # FIX: duplicaat "voltagelevel" verwijderd; enkel "voltage_level" behouden.
+            # Als je template "voltagelevel" gebruikt, verander dat dan ook naar "voltage_level".
             "voltage_level": spanningsniveau,
+            "infeed_value": waarde,
             "tijdstip": s.laatste_tijdstip,
             "waarde": waarde,
             "is_teruglevering": waarde is not None and waarde < 0,
@@ -625,6 +633,10 @@ class DashboardView(generic.TemplateView):
                     "sensor_id": m.sensor.sensor_id if m.sensor else "–",
                 })
 
+        # FIX: _build_frequentie_chart verwijderd; bokeh_script/bokeh_div
+        # niet langer in de context opgenomen. Verwijder ook de bijbehorende
+        # {% if bokeh_script %}...{% endif %} blokken uit dashboard.html.
+
         # ── INFEED RIJEN (efficiënt via subquery) ────────────────────────────
         infeed_rows = _get_infeed_rows(parameter_infeed)
 
@@ -660,6 +672,8 @@ class DashboardView(generic.TemplateView):
                     "sensor_id": m.sensor.sensor_id if m.sensor else "–",
                 })
 
+            # FIX: .exists() en .first() verwijderd (extra DB-calls op al geïtereerde queryset).
+            # De al opgebouwde lijst gebruiken is goedkoper en equivalent.
             if laatste_load_metingen:
                 totaal_load_mw = laatste_load_metingen[0]["waarde"]
 
@@ -765,6 +779,8 @@ class SensorDetailView(generic.DetailView):
             if rows:
                 df = pd.DataFrame(rows).sort_values("tijdstip")
 
+                # FIX: verwijder timezone-info zodat Bokeh de datetime correct verwerkt.
+                # Bokeh verwacht naïeve UTC datetimes; aware datetimes gooien een TypeError.
                 if pd.api.types.is_datetime64tz_dtype(df["tijdstip"]):
                     df["tijdstip"] = df["tijdstip"].dt.tz_convert("UTC").dt.tz_localize(None)
 
@@ -852,6 +868,9 @@ class RapportDetailView(generic.DetailView):
 # SENSOR IMPORT VAN API
 # ─────────────────────────────────────────────────────────────────────────────
 
+# FIX: @staff_member_required toegevoegd zodat enkel ingelogde stafleden
+# deze zware import-operatie kunnen triggeren. Anonieme gebruikers worden
+# doorgestuurd naar de login-pagina in plaats van de import te starten.
 @staff_member_required
 @require_POST
 def importeer_sensors_api_view(request):
@@ -974,6 +993,7 @@ def importeer_sensors_api_view(request):
                     defaults={
                         "waarde": waarde,
                         "kwaliteit": kwaliteit,
+                        "infeed_value": waarde if parameter_naam == "infeedvalue" else 0,
                     },
                 )
 

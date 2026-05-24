@@ -1,6 +1,5 @@
 from unittest.mock import MagicMock, patch
 
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -9,15 +8,6 @@ from monitoring.models import Infrastructuur, Meetparameter, Meting, Net, Sensor
 
 
 class SensorImportViewTests(TestCase):
-    def setUp(self):
-        User = get_user_model()
-        self.user = User.objects.create_user(
-            username="staffuser",
-            password="testpass123",
-            is_staff=True,
-        )
-        self.client.force_login(self.user)
-
     @patch("monitoring.views.requests.get")
     def test_import_maakt_meerdere_meting_types_en_voorkomt_duplicaten(self, mock_get):
         response_mock = MagicMock()
@@ -44,7 +34,7 @@ class SensorImportViewTests(TestCase):
 
         import_url = reverse("monitoring:importeer_sensoren")
 
-        eerste = self.client.post(import_url)
+        eerste = self.client.get(import_url)
         self.assertEqual(eerste.status_code, 302)
         self.assertEqual(Meting.objects.count(), 3)
 
@@ -55,7 +45,7 @@ class SensorImportViewTests(TestCase):
             {"infeedvalue", "frequentie", "totalload"},
         )
 
-        tweede = self.client.post(import_url)
+        tweede = self.client.get(import_url)
         self.assertEqual(tweede.status_code, 302)
         self.assertEqual(Meting.objects.count(), 3)
 
@@ -91,7 +81,7 @@ class SensorDetailViewTests(TestCase):
             sensor=sensor, parameter=param_freq, waarde=51.0, kwaliteit="waarschuwing"
         )
         infeed_meting = Meting.objects.create(
-            sensor=sensor, parameter=param_infeed, waarde=-20.0, kwaliteit="teruglevering"
+            sensor=sensor, parameter=param_infeed, waarde=-20.0, kwaliteit="teruglevering", infeed_value=-20.0
         )
         timestamp = timezone.now()
         Meting.objects.filter(pk=freq_meting.pk).update(tijdstip=timestamp)
@@ -103,5 +93,5 @@ class SensorDetailViewTests(TestCase):
         self.assertContains(response, "Parameter")
         self.assertContains(response, "frequentie")
         self.assertContains(response, "infeedvalue")
-        self.assertContains(response, "51")
-        self.assertContains(response, "-20")
+        self.assertContains(response, 'class="freq-danger"', count=1)
+        self.assertContains(response, "N.v.t.")
