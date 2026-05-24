@@ -151,7 +151,7 @@
                 <td style="font-size:12px;">{{ r.location }}</td>
                 <td style="font-size:12px;">{{ r.region }}</td>
                 <td style="font-size:12px;">{{ r.dso }}</td>
-                <td style="font-size:12px;">{{ r.voltagelevel }} kV</td>
+                <td style="font-size:12px;">{{ r.voltage_level }} kV</td>
                 <td class="{% if r.is_teruglevering %}freq-danger{% else %}freq-ok{% endif %}">
                     {{ r.waarde|floatformat:3 }}
                 </td>
